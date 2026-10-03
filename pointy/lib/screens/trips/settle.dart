@@ -131,9 +131,12 @@ String recap(Trip t, Settlement s) {
   final each = people == 0 ? 0 : s.spentPaise ~/ people;
   final top = [...s.lines]..sort((a, b) => b.refundPaise.compareTo(a.refundPaise));
   var text = '$people people put in ${formatPaise(s.depositedPaise)} and spent ${formatPaise(s.spentPaise)}, '
-      'about ${formatPaise(each)} each. ${formatPaise(s.refundPaise)} is left to send back.';
-  if (top.isNotEmpty && top.first.refundPaise > 0) {
-    text += ' ${top.first.user.name} gets the most back (${formatPaise(top.first.refundPaise)}).';
+      'about ${formatPaise(each)} each. ${formatPaise(s.refundPaise)} '
+      '${s.status == 'open' ? 'is left to send back' : 'was sent back'}.';
+  // Name who gets the most back only when one person clearly does.
+  if (top.length > 1 && top.first.refundPaise > top[1].refundPaise) {
+    final who = top.first.user.name;
+    text += ' ${who == 'You' ? 'You get' : '$who gets'} the most back (${formatPaise(top.first.refundPaise)}).';
   }
   return text;
 }

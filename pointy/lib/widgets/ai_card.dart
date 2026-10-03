@@ -61,7 +61,14 @@ class AiCard extends StatelessWidget {
                     ],
                     if (actionLabel != null) ...[
                       const SizedBox(height: 10),
-                      Text('$actionLabel →', style: AppText.detail(color: AppColors.amber900, weight: FontWeight.w700)),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(actionLabel!, style: AppText.detail(color: AppColors.amber900, weight: FontWeight.w700)),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_forward, size: 14, color: AppColors.amber900),
+                        ],
+                      ),
                     ],
                   ],
                 ),

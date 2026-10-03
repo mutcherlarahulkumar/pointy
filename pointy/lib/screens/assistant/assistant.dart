@@ -141,7 +141,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   Expanded(
                     child: TextField(
                       controller: _input,
-                      decoration: const InputDecoration(hintText: 'Collect ₹6,000 from everyone by 10 Oct'),
+                      decoration: const InputDecoration(hintText: 'Tell the assistant what to collect'),
                       onSubmitted: _ask,
                     ),
                   ),

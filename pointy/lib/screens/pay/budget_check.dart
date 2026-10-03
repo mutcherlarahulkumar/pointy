@@ -24,10 +24,13 @@ class BudgetCheckScreen extends StatefulWidget {
 class _BudgetCheckScreenState extends State<BudgetCheckScreen> {
   bool _busy = false;
 
-  // Raises the limit to cover this payment, rounded up to the next ₹1,000.
+  // A new limit that keeps this payment under the 80% warning line,
+  // rounded up to the next ₹1,000. Never lower than the current limit.
   int get _raisedLimit {
     const step = 100000;
-    return ((widget.check.afterPaise + step - 1) ~/ step) * step;
+    final needed = widget.check.afterPaise * 5 ~/ 4 + 1; // after < 80% of limit
+    final rounded = ((needed + step - 1) ~/ step) * step;
+    return rounded > widget.check.limitPaise ? rounded : widget.check.limitPaise + step;
   }
 
   Future<void> _raise() async {

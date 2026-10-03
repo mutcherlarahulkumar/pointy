@@ -101,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ]),
                     const SizedBox(height: 8),
                     Text(formatPaise(me.personalBalancePaise), style: AppText.balance()),
-                    if (me.isMock) Text('PayPal sandbox · demo mode', style: AppText.small()),
+                    Text(me.isMock ? 'Demo mode · PayPal is simulated' : 'PayPal sandbox', style: AppText.small()),
                   ],
                 ),
               ),
