@@ -146,5 +146,6 @@ class ApiClient {
       DepositRequest.fromJson(await _obj('POST', '/api/demo/requests/$requestId/paid'));
 }
 
-/// The one client the app uses.
-final api = ApiClient();
+/// The one client the app uses. Tests replace it with one that has a fake
+/// http.Client.
+ApiClient api = ApiClient();
