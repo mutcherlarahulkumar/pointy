@@ -45,5 +45,14 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Pointy uses the camera to scan payee QR codes.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pointy reads a rough location when you pay, to suggest the category and wallet.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
