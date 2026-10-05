@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, trips, users, schema_migrations CASCADE`)
+		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, trips, users, schema_migrations CASCADE`)
 		conn.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -140,10 +141,23 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 	call(asha, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000, "source": "balance"}, 201)
 	devDep := call(dev, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000}, 201)
 
+	// Pointy AI answers from the database and keeps the conversation.
+	turn := call(asha, "POST", "/api/assistant/messages", map[string]string{"text": "what's my balance?"}, 201)["list"].([]any)
+	if len(turn) != 2 || !strings.Contains(turn[1].(map[string]any)["text"].(string), "₹") {
+		t.Fatalf("assistant turn %v", turn)
+	}
+
 	// Restart: everything must come back from the database.
 	if dbURL != "" {
 		stop()
 		srv, stop = start()
+	}
+	if n := len(call(asha, "GET", "/api/assistant/messages", nil, 200)["list"].([]any)); n != 2 {
+		t.Fatalf("assistant history after restart has %d lines", n)
+	}
+	call(asha, "DELETE", "/api/assistant/messages", nil, 200)
+	if n := len(call(asha, "GET", "/api/assistant/messages", nil, 200)["list"].([]any)); n != 0 {
+		t.Fatalf("history not cleared: %d", n)
 	}
 	call(dev, "POST", fmt.Sprintf("/api/deposits/%s/capture", devDep["paypal_order_id"]), nil, 201)
 	reqs := call(asha, "GET", "/api/trips/"+tripID+"/requests", nil, 200)["list"].([]any)

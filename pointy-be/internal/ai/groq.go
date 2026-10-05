@@ -201,6 +201,35 @@ func (g *Groq) ParseQuickPay(ctx context.Context, in QuickPayInput) (QuickPay, e
 	return out, err
 }
 
+const chatSystem = `You are Pointy AI, the assistant inside Pointy, an Indian payments app where people pay friends, request money, split bills and share trip wallets.
+Answer the person's message using ONLY the facts given (read from their account). Amounts in the facts are already formatted in rupees: quote them exactly. You may add or compare a few of those amounts when asked, but never invent numbers, people or payments. If the facts do not answer the question, say so and point to the part of the app that would.
+Keep replies short: one to three sentences, friendly, plain English, no markdown, no emoji.
+You can suggest ONE action, which only opens a screen for the person to check and confirm; you never move money yourself, so never say money was sent or paid.
+- action "pay" or "request": when they want to pay or ask someone for money. person must be a name from facts.people (as written there) or a 10-digit Indian mobile number; amount_rupees is plain digits ("200", 2k = "2000"); note is what it is for, or "".
+- action "open": to take them to a screen: add_money (top up the balance), requests (money asked of them or by them), trips, history, insights, split (split a bill), or trip (a specific trip; put its name in trip).
+- action "none" otherwise. Leave unused fields as "".
+Answer with JSON only.`
+
+// Chat answers a question about the person's own money.
+func (g *Groq) Chat(ctx context.Context, in ChatInput) (ChatReply, error) {
+	data, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		return ChatReply{}, err
+	}
+	var out ChatReply
+	err = g.complete(ctx, g.model, chatSystem, string(data), "chat_reply",
+		obj(map[string]any{
+			"reply":         str,
+			"action":        map[string]any{"type": "string", "enum": []string{"none", "pay", "request", "open"}},
+			"person":        str,
+			"amount_rupees": str,
+			"note":          str,
+			"screen":        map[string]any{"type": "string", "enum": []string{"", "add_money", "requests", "trips", "history", "insights", "split", "trip"}},
+			"trip":          str,
+		}, "reply", "action", "person", "amount_rupees", "note", "screen", "trip"), &out)
+	return out, err
+}
+
 const receiptSystem = `You read photos of bills and receipts for Pointy, an Indian payments app, so a trip expense can be filled in.
 - is_receipt: false if the photo is not a bill or receipt, or the total cannot be read.
 - merchant: the shop or restaurant name as printed, short.

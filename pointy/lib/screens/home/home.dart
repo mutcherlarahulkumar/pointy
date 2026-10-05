@@ -17,10 +17,10 @@ import '../../widgets/personal_card.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/skeleton.dart';
 import '../../widgets/tile_icon.dart';
+import '../ai/pointy_ai.dart';
 import '../money/my_qr.dart';
 import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
-import '../money/quick_pay.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
 import '../money/top_up.dart';
@@ -281,14 +281,14 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
     );
   }
 
-  /// Opens "Say it": type a payment in one line and the AI fills it in.
+  /// Opens Pointy AI: questions about your money, or a payment in one line.
   Widget _sayIt() {
     return Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(28),
       child: InkWell(
         borderRadius: BorderRadius.circular(28),
-        onTap: () => _go(const QuickPayScreen()),
+        onTap: () => _go(const PointyAiScreen()),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -299,7 +299,15 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
             children: [
               const AiMark(size: 26),
               const SizedBox(width: 10),
-              Expanded(child: Text('Say it: "Pay Dev 200 for chai"', overflow: TextOverflow.ellipsis, style: AppText.body(color: AppColors.slate))),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Ask Pointy AI', style: AppText.body(weight: FontWeight.w700)),
+                    Text('"What did I spend this week?" · "Pay Dev 200"', overflow: TextOverflow.ellipsis, style: AppText.small()),
+                  ],
+                ),
+              ),
               const Icon(Icons.keyboard_voice_outlined, size: 20, color: AppColors.slate),
             ],
           ),

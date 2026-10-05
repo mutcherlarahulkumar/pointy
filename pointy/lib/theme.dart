@@ -26,6 +26,12 @@ class AppColors {
   static const personalDark = Color(0xFF22306A);
 }
 
+/// Endless decorative animations (the AI glow). Tests turn them off so they
+/// can wait for the screen to settle.
+class AppMotion {
+  static bool loops = true;
+}
+
 /// The soft shadow used under raised cards.
 const cardShadow = [BoxShadow(color: Color(0x14000000), blurRadius: 24, offset: Offset(0, 8))];
 

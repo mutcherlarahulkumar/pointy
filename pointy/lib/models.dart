@@ -655,27 +655,47 @@ class ScannedReceipt {
       );
 }
 
-/// A typed sentence ("pay Asha 200 for coffee") read into a payment or a
-/// request. Nothing is paid until the person confirms on the usual screen.
-class QuickPayRead {
-  final String action; // pay or request
+/// A button under a Pointy AI reply. It only opens a screen, filled in; the
+/// person still checks and confirms there.
+class ChatAction {
+  final String type; // pay, request, open
+  final String label;
   final Person? person;
-  final List<Person> choices; // when a name fits more than one person
   final int amountPaise;
   final String note;
-  final String reply;
-  final String source; // ai or rules
-  QuickPayRead({required this.action, this.person, this.choices = const [], required this.amountPaise, required this.note, required this.reply, required this.source});
+  final String screen; // add_money, requests, trips, history, insights, split, trip
+  final String tripId;
+  ChatAction({required this.type, required this.label, this.person, this.amountPaise = 0, this.note = '', this.screen = '', this.tripId = ''});
 
-  bool get isRequest => action == 'request';
-
-  factory QuickPayRead.fromJson(Map<String, dynamic> j) => QuickPayRead(
-        action: _str(j['action']),
+  factory ChatAction.fromJson(Map<String, dynamic> j) => ChatAction(
+        type: _str(j['type']),
+        label: _str(j['label']),
         person: j['person'] == null ? null : Person.fromJson(j['person'] as Map<String, dynamic>),
-        choices: _list(j['choices'], Person.fromJson),
         amountPaise: _int(j['amount_paise']),
         note: _str(j['note']),
-        reply: _str(j['reply']),
+        screen: _str(j['screen']),
+        tripId: _str(j['trip_id']),
+      );
+}
+
+/// One line of the conversation with Pointy AI, saved on the server.
+class ChatMessage {
+  final String id;
+  final String role; // user or assistant
+  final String text;
+  final ChatAction? action;
+  final String source; // ai or rules, on assistant lines
+  final String at;
+  ChatMessage({required this.id, required this.role, required this.text, this.action, this.source = '', this.at = ''});
+
+  bool get mine => role == 'user';
+
+  factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
+        id: _str(j['id']),
+        role: _str(j['role']),
+        text: _str(j['text']),
+        action: j['action'] == null ? null : ChatAction.fromJson(j['action'] as Map<String, dynamic>),
         source: _str(j['source']),
+        at: _str(j['at']),
       );
 }

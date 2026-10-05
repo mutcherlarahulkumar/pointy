@@ -21,6 +21,13 @@ type fakeAI struct {
 	gotType     string
 	quick       ai.QuickPay
 	quickIn     ai.QuickPayInput
+	chat        ai.ChatReply
+	chatIn      ai.ChatInput
+}
+
+func (f *fakeAI) Chat(_ context.Context, in ai.ChatInput) (ai.ChatReply, error) {
+	f.chatIn = in
+	return f.chat, f.err
 }
 
 func (f *fakeAI) ParseQuickPay(_ context.Context, in ai.QuickPayInput) (ai.QuickPay, error) {

@@ -110,6 +110,10 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 		_, err = tx.Exec(ctx, `INSERT INTO money_requests (id, requester_id, payer_id, amount, note, status, created_at, closed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			ON CONFLICT (id) DO UPDATE SET status=$6, closed_at=$8`,
 			v.ID, v.RequesterID, v.PayerID, int64(v.Amount), v.Note, v.Status, v.CreatedAt, v.ClosedAt)
+	case *domain.ChatMessage:
+		_, err = tx.Exec(ctx, `INSERT INTO chat_messages (id, user_id, body, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, v.ID, v.UserID, js(v), v.At)
+	case domain.ChatCleared:
+		_, err = tx.Exec(ctx, `DELETE FROM chat_messages WHERE user_id=$1`, v.UserID)
 	default:
 		return fmt.Errorf("store: cannot save %T", it)
 	}
@@ -290,6 +294,20 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 				}
 				m.Amount = domain.Paise(amt)
 				s.MoneyRequests = append(s.MoneyRequests, m)
+				return nil
+			})
+		},
+		func() error {
+			return q(`SELECT user_id, body FROM chat_messages ORDER BY seq`, func(r pgx.Rows) error {
+				m := &domain.ChatMessage{}
+				var body []byte
+				if err := r.Scan(&m.UserID, &body); err != nil {
+					return err
+				}
+				if err := json.Unmarshal(body, m); err != nil {
+					return err
+				}
+				s.Chats = append(s.Chats, m)
 				return nil
 			})
 		},

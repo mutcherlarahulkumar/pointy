@@ -121,9 +121,13 @@ class ApiClient {
   Future<Expense> payPerson(Map<String, dynamic> body, {required String key}) async =>
       Expense.fromJson(await _obj('POST', '/api/payments/personal', body: body, key: key));
 
-  /// Reads "pay Asha 200 for coffee". Pays nothing.
-  Future<QuickPayRead> quickPay(String text) async =>
-      QuickPayRead.fromJson(await _obj('POST', '/api/quick-pay', body: {'text': text}));
+  // Pointy AI: the conversation is saved on the server.
+  Future<List<ChatMessage>> chatHistory() async =>
+      (await _arr('GET', '/api/assistant/messages')).map(ChatMessage.fromJson).toList();
+  /// Sends one message; returns it and the reply.
+  Future<List<ChatMessage>> chat(String text) async =>
+      (await _arr('POST', '/api/assistant/messages', body: {'text': text})).map(ChatMessage.fromJson).toList();
+  Future<void> clearChat() async => _send('DELETE', '/api/assistant/messages');
 
   // Requests between people
   Future<List<MoneyRequest>> moneyRequests() async => (await _arr('GET', '/api/money-requests')).map(MoneyRequest.fromJson).toList();

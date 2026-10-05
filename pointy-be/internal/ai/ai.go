@@ -22,6 +22,37 @@ type Assistant interface {
 	ReadReceipt(ctx context.Context, image []byte, mediaType string) (Receipt, error)
 	// ParseQuickPay reads a one-line payment such as "pay Asha 200 for coffee".
 	ParseQuickPay(ctx context.Context, in QuickPayInput) (QuickPay, error)
+	// Chat answers the person's question about their own money from facts
+	// the app read from its database, and may suggest one action.
+	Chat(ctx context.Context, in ChatInput) (ChatReply, error)
+}
+
+// ChatInput is everything the assistant may know: the person's facts
+// (amounts already formatted as rupees), the recent conversation and the
+// new message.
+type ChatInput struct {
+	Today        string     `json:"today"`
+	You          string     `json:"you"`
+	Facts        any        `json:"facts"`
+	Conversation []ChatLine `json:"conversation"`
+	Message      string     `json:"message"`
+}
+
+type ChatLine struct {
+	Role string `json:"role"` // user or assistant
+	Text string `json:"text"`
+}
+
+// ChatReply is the answer and at most one suggested action. Nothing runs by
+// itself: the app shows a button that opens a screen to check and confirm.
+type ChatReply struct {
+	Reply  string `json:"reply"`
+	Action string `json:"action"`        // none, pay, request, open
+	Person string `json:"person"`        // a name from the facts' people, a 10-digit mobile, or ""
+	Amount string `json:"amount_rupees"` // "200" or ""
+	Note   string `json:"note"`
+	Screen string `json:"screen"` // add_money, requests, trips, history, insights, split, trip, or ""
+	Trip   string `json:"trip"`   // trip name when screen is trip
 }
 
 // QuickPayInput is what the person typed plus the names of people they

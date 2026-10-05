@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:pointy/api.dart';
+import 'package:pointy/theme.dart';
 
 /// Reads a JSON response captured from a running backend.
 String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync();
@@ -11,6 +12,7 @@ String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync
 /// An ApiClient answered from fixtures, so widget tests run without a
 /// server. [overrides] maps "METHOD /path" to (status, body).
 ApiClient fakeApi({Map<String, (int, String)> overrides = const {}, List<http.Request>? log}) {
+  AppMotion.loops = false; // endless glows would keep pumpAndSettle waiting
   final trips = jsonDecode(fixture('trips')) as List;
   final routes = <String, (int, String)>{
     'GET /api/me': (200, fixture('me')),

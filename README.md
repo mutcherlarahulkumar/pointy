@@ -30,7 +30,7 @@ The backend service needs these environment variables:
 | `PAYPAL_CURRENCY` | `USD` |
 | `POINTY_INR_PER_UNIT` | `85` (rupees per dollar used for conversion) |
 | `PAYPAL_WEBHOOK_ID` | optional |
-| `GROQ_API_KEY` | optional: turns on AI trip summaries, the free-form deposit assistant, receipt scanning and reading "Say it" payments (Groq) |
+| `GROQ_API_KEY` | optional: turns on AI trip summaries, the free-form deposit assistant, receipt scanning and the Pointy AI assistant (Groq) |
 | `POINTY_AI_MODEL` | optional, default `openai/gpt-oss-120b` |
 | `POINTY_AI_VISION_MODEL` | optional, model that reads receipt photos, default `meta-llama/llama-4-scout-17b-16e-instruct` |
 
@@ -43,7 +43,7 @@ The server applies pending database migrations when it starts, so nothing extra 
 1. Phone A and phone B install the APK and sign up with their numbers (name, then a 6-digit PIN).
 2. A: **Add money** ₹2,000 → approve on PayPal with the sandbox personal account → back in the app it shows as added.
 3. A: **Pay** → B's number → ₹150 → Pay → confirm with your Pointy PIN (Profile → Confirm payments switches to fingerprint). B's home updates within 10 seconds, with an alert.
-4. B: Home → **Say it** → "ask Rahul for 300 for the movie" (any name from B's people) → Continue → Ask. Or B: **Request** → A → ₹300 "Movie". A sees it on Home → Pay.
+4. B: tap the glowing **Ask AI** button → "ask Rahul for 300 for the movie" (any name from B's people) → **Ask Rahul for ₹300** → Ask. Try "what did I spend this week?" and "who owes me?" too. Or B: **Request** → A → ₹300 "Movie". A sees it on Home → Pay.
 5. A: **Split bill** → ₹1,200 dinner → add B → B gets a request for ₹600.
 6. A: **Trips → Plan a trip** with B, ₹3,000 each → the assistant drafts → **Send 1 request**.
 7. B: Trips → the trip → Deposits → **You owe ₹3,000** → pay from balance or PayPal.

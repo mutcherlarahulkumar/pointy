@@ -50,7 +50,7 @@ func TestMigrateUpDown(t *testing.T) {
 	defer pool.Close()
 	all, _ := Migrations()
 	reset := func() {
-		if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, trips, users, schema_migrations CASCADE`); err != nil {
+		if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, trips, users, schema_migrations CASCADE`); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -125,3 +125,20 @@ func TestParseQuickPay(t *testing.T) {
 		t.Fatalf("contacts or message missing from the request: %s", user)
 	}
 }
+
+func TestChatSendsFactsAndReadsTheAction(t *testing.T) {
+	g, body, _ := fakeGroq(t, 200, "stop", `{"reply":"You have ₹1,850. Want to pay Dev?","action":"pay","person":"Dev Mehta","amount_rupees":"200","note":"chai","screen":"","trip":""}`)
+	got, err := g.Chat(context.Background(), ChatInput{You: "Asha", Facts: map[string]string{"balance": "₹1,850"}, Message: "pay dev 200"})
+	if err != nil || got.Action != "pay" || got.Person != "Dev Mehta" || got.Amount != "200" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	msgs := (*body)["messages"].([]any)
+	user := msgs[len(msgs)-1].(map[string]any)["content"].(string)
+	if !strings.Contains(user, "₹1,850") || !strings.Contains(user, "pay dev 200") {
+		t.Fatalf("facts or message missing: %s", user)
+	}
+	schema := (*body)["response_format"].(map[string]any)["json_schema"].(map[string]any)
+	if schema["name"] != "chat_reply" {
+		t.Fatalf("schema %v", schema["name"])
+	}
+}
