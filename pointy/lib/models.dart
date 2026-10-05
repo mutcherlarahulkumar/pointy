@@ -351,6 +351,10 @@ class Insights {
   final List<Breakdown> byPlace;
   final List<Breakdown> byPerson;
   final String summary;
+  final String tip;
+
+  /// "ai" when a language model wrote the summary, "rules" for the template.
+  final String summarySource;
   Insights({
     required this.spentPaise,
     required this.perPersonPaise,
@@ -362,6 +366,8 @@ class Insights {
     required this.byPlace,
     required this.byPerson,
     required this.summary,
+    this.tip = '',
+    this.summarySource = 'rules',
   });
 
   factory Insights.fromJson(Map<String, dynamic> j) => Insights(
@@ -375,6 +381,8 @@ class Insights {
         byPlace: _list(j['by_place'], Breakdown.fromJson),
         byPerson: _list(j['by_person'], Breakdown.fromJson),
         summary: _str(j['summary']),
+        tip: _str(j['tip']),
+        summarySource: _str(j['summary_source']),
       );
 }
 
@@ -419,12 +427,26 @@ class Plan {
   final List<PlanItem> items;
   final int totalPaise;
   final String status;
-  Plan({required this.id, required this.instruction, required this.perPersonPaise, required this.due, required this.items, required this.totalPaise, required this.status});
+
+  /// The assistant's one-line reply, and who read the instruction ("ai" or "rules").
+  final String note;
+  final String source;
+  Plan({
+    required this.id,
+    required this.instruction,
+    required this.perPersonPaise,
+    required this.due,
+    required this.items,
+    required this.totalPaise,
+    required this.status,
+    this.note = '',
+    this.source = 'rules',
+  });
 
   int get requestCount => items.where((i) => i.channel == 'request').length;
 
-  Plan withStatus(String s) =>
-      Plan(id: id, instruction: instruction, perPersonPaise: perPersonPaise, due: due, items: items, totalPaise: totalPaise, status: s);
+  Plan withStatus(String s) => Plan(
+      id: id, instruction: instruction, perPersonPaise: perPersonPaise, due: due, items: items, totalPaise: totalPaise, status: s, note: note, source: source);
 
   factory Plan.fromJson(Map<String, dynamic> j) => Plan(
         id: _str(j['id']),
@@ -434,6 +456,8 @@ class Plan {
         items: _list(j['items'], PlanItem.fromJson),
         totalPaise: _int(j['total_paise']),
         status: _str(j['status']),
+        note: _str(j['note']),
+        source: _str(j['source']),
       );
 }
 

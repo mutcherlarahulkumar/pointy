@@ -53,6 +53,15 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 
 Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `wrong_pin`, `too_many_attempts`, `signed_out`.
 
+## AI features (optional)
+
+With `ANTHROPIC_API_KEY` set, `internal/ai` uses Claude (`claude-opus-5-5` by default, `POINTY_AI_MODEL` to change it):
+
+- **Trip summaries**: Insights gets a plain-words summary and one tip, written from pre-formatted numbers (the model never does money arithmetic). Cached per trip until the numbers change.
+- **Deposit assistant**: free-form instructions such as "ask Dev and Meera for 2k by Friday" become a plan for just those people. The model only drafts; the organiser still confirms before anything is sent.
+
+Requests use structured outputs (JSON schema), low effort, and server-side refusal fallbacks. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
+
 ## PayPal sandbox
 
 1. In the PayPal developer dashboard create a sandbox **business** account and a **personal** account, both with country **United States**, and a REST app on the business account.

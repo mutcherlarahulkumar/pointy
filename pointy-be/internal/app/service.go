@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/ai"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
 )
@@ -55,6 +56,17 @@ type Service struct {
 	plans         map[string]*domain.Plan
 	alerts        []*domain.Alert
 	moneyRequests []*domain.MoneyRequest
+
+	// ai is optional: without it summaries and the assistant use rules.
+	ai          ai.Assistant
+	aiSummaries map[string]cachedSummary // trip id -> last AI summary
+}
+
+// SetAssistant turns on the language-model features.
+func (s *Service) SetAssistant(a ai.Assistant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ai = a
 }
 
 // New makes a service with no state. Call Load to read what store holds;
@@ -68,7 +80,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{},
+		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{},
 	}
 }
 

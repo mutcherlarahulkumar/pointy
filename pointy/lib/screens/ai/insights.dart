@@ -76,7 +76,15 @@ class _TripInsightsState extends State<_TripInsights> {
           children: [
             Text('${trip.name} · day ${i.day} of ${i.days}', style: AppText.detail()),
             const SizedBox(height: 8),
-            AiCard(title: 'Summary', body: i.summary),
+            AiCard(
+              title: 'Summary',
+              body: i.summary,
+              reasons: [i.summarySource == 'ai' ? 'Written by Claude' : 'From your numbers'],
+            ),
+            if (i.tip.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              AiCard(title: 'Tip', body: i.tip),
+            ],
             const SizedBox(height: 16),
             Totals(spentPaise: i.spentPaise, eachPaise: i.perPersonPaise, leftPaise: i.leftPaise),
             BreakdownSection('By category', i.byCategory, labels: categoryLabel),

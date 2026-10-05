@@ -81,7 +81,9 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 			})
 		})
 	}
-	authed := func(pattern string, fn func(w http.ResponseWriter, r *http.Request) (any, error)) { handle(pattern, false, fn) }
+	authed := func(pattern string, fn func(w http.ResponseWriter, r *http.Request) (any, error)) {
+		handle(pattern, false, fn)
+	}
 	body := func(r *http.Request, v any) error { return decode(r, v) }
 
 	handle("GET /health", true, func(w http.ResponseWriter, r *http.Request) (any, error) {
@@ -200,7 +202,9 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		}
 		return svc.CreateTrip(userID(r), in)
 	})
-	authed("GET /api/trips/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) { return svc.Trip(r.PathValue("id"), userID(r)) })
+	authed("GET /api/trips/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.Trip(r.PathValue("id"), userID(r))
+	})
 	authed("POST /api/trips/{id}/members", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
 			Members []string `json:"members"`
@@ -254,7 +258,7 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		return svc.BudgetPreview(r.PathValue("id"), userID(r), in.Category, in.Amount)
 	})
 	authed("GET /api/trips/{id}/insights", func(w http.ResponseWriter, r *http.Request) (any, error) {
-		return svc.Insights(r.PathValue("id"), userID(r))
+		return svc.Insights(r.Context(), r.PathValue("id"), userID(r))
 	})
 	authed("GET /api/trips/{id}/settlement", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.SettlementPreview(r.PathValue("id"), userID(r))
@@ -269,7 +273,7 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		if err := body(r, &in); err != nil {
 			return nil, err
 		}
-		return svc.DraftPlan(r.PathValue("id"), userID(r), in.Instruction)
+		return svc.DraftPlan(r.Context(), r.PathValue("id"), userID(r), in.Instruction)
 	})
 	authed("POST /api/trips/{id}/assistant/plans/{planID}/confirm", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.ConfirmPlan(r.PathValue("id"), r.PathValue("planID"), userID(r))
