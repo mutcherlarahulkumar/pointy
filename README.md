@@ -36,6 +36,8 @@ The backend service needs these environment variables:
 
 Build command `go build -o bin/server ./cmd/server`, start command `./bin/server`, root directory `pointy-be`, health check `/health`. `POINTY_SEED` and `POINTY_CLOCK` are no longer used.
 
+The server applies pending database migrations when it starts, so nothing extra is needed on deploy. To inspect or roll back by hand, run `go run ./cmd/migrate status | up [n] | down [n]` from `pointy-be` with `DATABASE_URL` set (see `pointy-be/Readme.md`).
+
 ## Two-phone demo
 
 1. Phone A and phone B install the APK and sign up with their numbers (name, then a 6-digit PIN).
