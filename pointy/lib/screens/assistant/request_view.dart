@@ -45,7 +45,8 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
   @override
   Widget build(BuildContext context) {
     final r = _r;
-    final link = r.payUrl.isNotEmpty ? r.payUrl : 'https://www.paypal.com/invoice/p/#${r.paypalInvoiceId}';
+    // The mock rail's links end in .invalid and go nowhere.
+    final realLink = r.payUrl.isNotEmpty && !Uri.parse(r.payUrl).host.endsWith('.invalid');
     return Scaffold(
       appBar: AppBar(title: const Text('Deposit request')),
       body: ListView(
@@ -63,20 +64,25 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
           ),
           const SizedBox(height: 24),
           if (!r.isPaid) ...[
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                child: QrImageView(data: link, size: 200),
+            if (r.payUrl.isNotEmpty) ...[
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                  child: QrImageView(data: r.payUrl, size: 200),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Center(child: Text('Scan to pay on PayPal', style: AppText.detail())),
+              const SizedBox(height: 8),
+              Center(
+                child: Text(realLink ? 'Scan to pay on PayPal' : 'Demo code: PayPal is simulated', style: AppText.detail()),
+              ),
+            ] else
+              Text('PayPal has not issued a pay link for this request yet.', style: AppText.detail()),
             const SizedBox(height: 24),
             FilledButton.icon(
               icon: const Icon(Icons.open_in_new),
               label: const Text('Pay with PayPal'),
-              onPressed: r.payUrl.isEmpty
+              onPressed: !realLink
                   ? null
                   : () => launchUrl(Uri.parse(r.payUrl), mode: LaunchMode.externalApplication),
             ),

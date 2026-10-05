@@ -29,7 +29,8 @@ class _NewTripScreenState extends State<NewTripScreen> {
   DateTime? _payBy;
   final Set<String> _people = {};
   late final Future<List<User>> _contacts = _loadContacts();
-  final _key = newIdempotencyKey();
+  // One key per attempt; a new one after an error the server stored (4xx).
+  String _key = newIdempotencyKey();
   bool _busy = false;
 
   Future<List<User>> _loadContacts() async => contactsFrom(await api.trips(), api.userId);
@@ -85,6 +86,7 @@ class _NewTripScreenState extends State<NewTripScreen> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      if (e is ApiException && e.status >= 400 && e.status < 500) _key = newIdempotencyKey();
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);

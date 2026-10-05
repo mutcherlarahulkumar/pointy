@@ -23,7 +23,8 @@ class SettleScreen extends StatefulWidget {
 
 class _SettleScreenState extends State<SettleScreen> {
   late Future<Settlement> _settlement = api.settlement(widget.trip.id);
-  final _key = newIdempotencyKey();
+  // One key per attempt; a new one after an error the server stored (4xx).
+  String _key = newIdempotencyKey();
   bool _busy = false;
 
   Future<void> _send(Settlement s) async {
@@ -45,6 +46,7 @@ class _SettleScreenState extends State<SettleScreen> {
       final done = await api.settle(widget.trip.id, key: _key);
       setState(() => _settlement = Future.value(done));
     } catch (e) {
+      if (e is ApiException && e.status >= 400 && e.status < 500) _key = newIdempotencyKey();
       if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
