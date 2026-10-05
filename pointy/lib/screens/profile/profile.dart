@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../api.dart';
 import '../../models.dart';
+import '../../payment_lock.dart';
 import '../../session.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
@@ -23,6 +24,22 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late final Future<Me> _me = api.me();
+  bool? _lockOn;
+
+  @override
+  void initState() {
+    super.initState();
+    PaymentLock.instance.isOn().then((on) {
+      if (mounted) setState(() => _lockOn = on);
+    });
+  }
+
+  Future<void> _setLock(bool on) async {
+    // Turning it off is itself checked, so a borrowed phone cannot switch it off.
+    if (!on && !await confirmPayment(context, 'Turn off the check before payments')) return;
+    await PaymentLock.instance.setOn(on);
+    if (mounted) setState(() => _lockOn = on);
+  }
 
   Future<void> _signOut() async {
     final ok = await showDialog<bool>(
@@ -69,6 +86,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             tile(Icons.qr_code_2_rounded, 'My QR', 'Friends scan it to pay you', () => go(const MyQrScreen())),
             tile(Icons.swap_vert_rounded, 'Requests', 'Money asked of you, and by you', () => go(const RequestsScreen())),
             const SectionTitle('Settings'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Card(
+                child: SwitchListTile(
+                  secondary: const TileIcon(Icons.fingerprint_rounded),
+                  title: Text('Confirm payments', style: AppText.body(weight: FontWeight.w600)),
+                  subtitle: Text('Fingerprint, face or screen lock; your PIN if the phone has none', style: AppText.detail()),
+                  value: _lockOn ?? true,
+                  onChanged: _lockOn == null ? null : _setLock,
+                ),
+              ),
+            ),
             tile(Icons.tune_rounded, 'What the AI may use', 'Choose what suggestions can look at', () => go(const AiSettingsScreen())),
             tile(Icons.info_outline_rounded, 'How Pointy works in India', 'Where PayPal fits in', () => go(const HowItWorksScreen())),
             const SizedBox(height: 8),

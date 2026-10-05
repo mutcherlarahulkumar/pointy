@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
+import '../../payment_lock.dart';
 import '../../dates.dart';
 import '../../money.dart';
 import '../../models.dart';
@@ -161,8 +162,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44)),
                         onPressed: busy
                             ? null
-                            : () => _act(r, () => api.payMoneyRequest(r.id, key: newIdempotencyKey()),
-                                'Paid ${formatPaise(r.amountPaise)} to ${firstName(r.other.name)}'),
+                            : () async {
+                                if (!await confirmPayment(context, 'Pay ${formatPaise(r.amountPaise)} to ${r.other.name}')) return;
+                                await _act(r, () => api.payMoneyRequest(r.id, key: newIdempotencyKey()),
+                                    'Paid ${formatPaise(r.amountPaise)} to ${firstName(r.other.name)}');
+                              },
                         child: Text('Pay ${formatPaise(r.amountPaise)}'),
                       ),
                     ),

@@ -117,6 +117,15 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		}
 		return svc.Login(in.Phone, in.PIN)
 	})
+	authed("POST /api/auth/verify-pin", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			PIN string `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"ok": true}, svc.VerifyPIN(userID(r), in.PIN)
+	})
 	authed("POST /api/auth/logout", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]bool{"ok": true}, svc.Logout(bearer(r))
 	})

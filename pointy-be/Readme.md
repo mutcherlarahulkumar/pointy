@@ -60,7 +60,7 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 
 | Area | Routes |
 |---|---|
-| Sign in | `POST /api/auth/check-phone`, `POST /api/auth/register` (name, phone, 6-digit PIN), `POST /api/auth/login`, `POST /api/auth/logout` |
+| Sign in | `POST /api/auth/check-phone`, `POST /api/auth/register` (name, phone, 6-digit PIN), `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/verify-pin` (`{"pin"}`, checks the PIN before a payment on phones with no screen lock; wrong PINs share the sign-in lockout) |
 | You | `GET /api/me`, `GET /api/contacts`, `GET /api/users/lookup?phone=`, `GET /api/users/{id}` |
 | Balance | `POST /api/topups`, `GET /api/deposits/{orderID}`, `POST /api/deposits/{orderID}/capture`, `POST /api/payments/personal` |
 | Requests | `GET/POST /api/money-requests`, `POST /api/money-requests/{id}/pay`, `.../decline`, `POST /api/splits` |

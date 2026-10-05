@@ -45,6 +45,8 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Pointy asks for Face ID before money leaves your balance.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Pointy uses the camera to scan payee QR codes and receipts.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

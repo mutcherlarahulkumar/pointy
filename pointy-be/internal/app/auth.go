@@ -117,6 +117,35 @@ func (s *Service) Login(rawPhone, pin string) (AuthResult, error) {
 	if err != nil {
 		return AuthResult{}, err
 	}
+	id, err := s.checkPIN(phone, pin)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token := s.newSessionL(id)
+	if err := s.commitL(); err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{Token: token, User: s.users[id]}, nil
+}
+
+// VerifyPIN checks a signed-in person's PIN before a payment, on phones with
+// no fingerprint or screen lock. Wrong PINs count towards the same lockout
+// as signing in.
+func (s *Service) VerifyPIN(userID, pin string) error {
+	s.mu.Lock()
+	u, ok := s.users[userID]
+	s.mu.Unlock()
+	if !ok {
+		return domain.NotFound("user")
+	}
+	_, err := s.checkPIN(u.Phone, pin)
+	return err
+}
+
+// checkPIN compares a PIN with the account for phone, counting wrong ones.
+func (s *Service) checkPIN(phone, pin string) (string, error) {
 	s.mu.Lock()
 	recent := s.failedLogins[phone][:0:0]
 	for _, at := range s.failedLogins[phone] {
@@ -127,7 +156,7 @@ func (s *Service) Login(rawPhone, pin string) (AuthResult, error) {
 	s.failedLogins[phone] = recent
 	if len(recent) >= maxFailedPINs {
 		s.mu.Unlock()
-		return AuthResult{}, &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_attempts", Message: "too many wrong PINs; try again in 15 minutes"}
+		return "", &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_attempts", Message: "too many wrong PINs; try again in 15 minutes"}
 	}
 	id, ok := s.phones[phone]
 	var hash string
@@ -143,18 +172,14 @@ func (s *Service) Login(rawPhone, pin string) (AuthResult, error) {
 		left := maxFailedPINs - len(s.failedLogins[phone])
 		s.mu.Unlock()
 		if !ok {
-			return AuthResult{}, domain.NotFound("account for this number")
+			return "", domain.NotFound("account for this number")
 		}
-		return AuthResult{}, &domain.Error{Status: http.StatusUnauthorized, Code: "wrong_pin", Message: "wrong PIN", Details: map[string]int{"attempts_left": left}}
+		return "", &domain.Error{Status: http.StatusUnauthorized, Code: "wrong_pin", Message: "wrong PIN", Details: map[string]int{"attempts_left": left}}
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.failedLogins, phone)
-	token := s.newSessionL(id)
-	if err := s.commitL(); err != nil {
-		return AuthResult{}, err
-	}
-	return AuthResult{Token: token, User: s.users[id]}, nil
+	s.mu.Unlock()
+	return id, nil
 }
 
 func (s *Service) Logout(token string) error {

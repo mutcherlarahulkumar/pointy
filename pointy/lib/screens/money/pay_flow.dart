@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
+import '../../payment_lock.dart';
 import '../../money.dart';
 import '../../models.dart';
 import '../../theme.dart';
@@ -113,6 +114,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   bool _busy = false;
 
   Future<void> _pay() async {
+    if (!await confirmPayment(context, 'Pay ${formatPaise(widget.amountPaise)} to ${widget.person.name}')) return;
     setState(() => _busy = true);
     try {
       final e = await api.payPerson({
@@ -165,9 +167,9 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
           footer: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.lock_outline, size: 14, color: AppColors.slate),
+              const Icon(Icons.fingerprint_rounded, size: 14, color: AppColors.slate),
               const SizedBox(width: 4),
-              Text('Instant, from your Pointy balance', style: AppText.small()),
+              Flexible(child: Text('Instant, from your balance. You confirm with your fingerprint or PIN.', textAlign: TextAlign.center, style: AppText.small())),
             ],
           ),
           children: [

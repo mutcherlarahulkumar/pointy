@@ -100,6 +100,8 @@ class ApiClient {
   Future<AuthResult> login(String phone, String pin) async =>
       AuthResult.fromJson(await _obj('POST', '/api/auth/login', body: {'phone': phone, 'pin': pin}));
   Future<void> logout() async => _send('POST', '/api/auth/logout');
+  /// Checks the signed-in person's PIN before a payment (phones with no screen lock).
+  Future<void> verifyPin(String pin) async => _send('POST', '/api/auth/verify-pin', body: {'pin': pin});
 
   // You and people
   Future<Me> me() async => Me.fromJson(await _obj('GET', '/api/me'));

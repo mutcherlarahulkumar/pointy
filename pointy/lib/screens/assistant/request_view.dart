@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
+import '../../payment_lock.dart';
 import '../../dates.dart';
 import '../../money.dart';
 import '../../models.dart';
@@ -38,6 +39,7 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
   bool _busy = false;
 
   Future<void> _payFromBalance() async {
+    if (!await confirmPayment(context, 'Pay ${formatPaise(widget.request.amountPaise)} into ${widget.trip.name}')) return;
     setState(() => _busy = true);
     try {
       final r = await api.payDepositRequest(widget.request.id, key: _key);
