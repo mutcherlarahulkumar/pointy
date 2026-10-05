@@ -55,12 +55,12 @@ Errors are `{"error":{"code","message","details"}}`; codes include `budget_warni
 
 ## AI features (optional)
 
-With `ANTHROPIC_API_KEY` set, `internal/ai` uses Claude (`claude-opus-5-5` by default, `POINTY_AI_MODEL` to change it):
+With `GROQ_API_KEY` set, `internal/ai` uses Groq's OpenAI-compatible chat API (`openai/gpt-oss-120b` by default, `POINTY_AI_MODEL` to change it):
 
 - **Trip summaries**: Insights gets a plain-words summary and one tip, written from pre-formatted numbers (the model never does money arithmetic). Cached per trip until the numbers change.
 - **Deposit assistant**: free-form instructions such as "ask Dev and Meera for 2k by Friday" become a plan for just those people. The model only drafts; the organiser still confirms before anything is sent.
 
-Requests use structured outputs (JSON schema), low effort, and server-side refusal fallbacks. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
+Requests ask for JSON matching a schema; on the gpt-oss models Groq enforces it strictly (constrained decoding), and answers are validated either way. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
 
 ## PayPal sandbox
 
