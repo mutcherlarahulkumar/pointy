@@ -7,11 +7,15 @@ import '../../dates.dart';
 import '../../money.dart';
 import '../../models.dart';
 import '../../theme.dart';
+import '../../tabs.dart';
+import '../../tour.dart';
 import '../../widgets/ai_card.dart';
+import '../../widgets/ai_mark.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/personal_card.dart';
 import '../../widgets/section_title.dart';
+import '../../widgets/skeleton.dart';
 import '../../widgets/tile_icon.dart';
 import '../money/my_qr.dart';
 import '../money/pay_flow.dart';
@@ -44,7 +48,7 @@ class _HomeData {
   _HomeData(this.me, this.suggestion, this.people, this.toPay);
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
   late Future<_HomeData> _data = _load();
   _HomeData? _last;
   Timer? _timer;
@@ -65,13 +69,66 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _refreshQuietly());
+    _checkTour();
+    // Only while Home is on screen: other tabs and pages pause it.
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (MainTabs.current.value == 0 && (ModalRoute.of(context)?.isCurrent ?? true)) _refreshQuietly();
+    });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void reloadQuietly() => _refreshQuietly();
+
+  // Offers the tour on Home until it has been taken or dismissed.
+  bool _offerTour = false;
+
+  void _checkTour() async {
+    final seen = await TourPrefs.seen();
+    if (mounted && !seen) setState(() => _offerTour = true);
+  }
+
+  Widget _tourBanner() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+      decoration: BoxDecoration(color: AppColors.pine100, borderRadius: BorderRadius.circular(16)),
+      child: Row(
+        children: [
+          const Icon(Icons.explore_rounded, color: AppColors.pine700, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('New to Pointy?', style: AppText.body(color: AppColors.pine900, weight: FontWeight.w700)),
+                Text('A one-minute tour of what each part does.', style: AppText.detail(color: AppColors.pine900)),
+              ],
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 40), padding: const EdgeInsets.symmetric(horizontal: 14)),
+            onPressed: () {
+              setState(() => _offerTour = false);
+              startTour(context);
+            },
+            child: const Text('Start tour'),
+          ),
+          IconButton(
+            tooltip: 'Not now',
+            icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.pine700),
+            onPressed: () {
+              setState(() => _offerTour = false);
+              TourPrefs.markSeen();
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   // Updates in place without showing a spinner.
@@ -98,8 +155,10 @@ class _HomeScreenState extends State<HomeScreen> {
         if (snap.hasError && snap.data == null) {
           return ErrorView(message: '${snap.error}', onRetry: () => setState(() => _data = _load()));
         }
-        if (snap.data == null) return const Center(child: CircularProgressIndicator());
-        return _body(snap.data!);
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: snap.data == null ? const Skeleton(key: ValueKey('loading')) : KeyedSubtree(key: const ValueKey('home'), child: _body(snap.data!)),
+        );
       },
     );
   }
@@ -113,7 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Row(
             children: [
-              GestureDetector(onTap: () => _go(const ProfileScreen()), child: Avatar(me.user.name, size: 44)),
+              GestureDetector(key: TourKeys.profile, onTap: () => _go(const ProfileScreen()), child: Avatar(me.user.name, size: 44)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -125,6 +184,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               IconButton(
+                tooltip: 'Take the tour',
+                onPressed: () => startTour(context),
+                icon: const Icon(Icons.explore_outlined),
+              ),
+              IconButton(
+                key: TourKeys.alerts,
                 tooltip: 'Alerts',
                 onPressed: () => _go(const AlertsScreen()),
                 icon: Badge(
@@ -137,16 +202,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 16),
+          if (_offerTour) ...[_tourBanner(), const SizedBox(height: 16)],
           PersonalCard(
+            key: TourKeys.balance,
             balancePaise: me.personalBalancePaise,
             caption: me.isMock ? 'Demo mode · PayPal is simulated' : 'Add money with PayPal sandbox',
             actions: [
-              CardButton(icon: Icons.add_rounded, label: 'Add money', primary: true, onTap: () => _go(const TopUpScreen())),
-              CardButton(icon: Icons.qr_code_2_rounded, label: 'My QR', onTap: () => _go(const MyQrScreen())),
+              CardButton(key: TourKeys.addMoney, icon: Icons.add_rounded, label: 'Add money', primary: true, onTap: () => _go(const TopUpScreen())),
+              CardButton(key: TourKeys.myQr, icon: Icons.qr_code_2_rounded, label: 'My QR', onTap: () => _go(const MyQrScreen())),
             ],
           ),
           const SizedBox(height: 20),
           Row(
+            key: TourKeys.actions,
             children: [
               _action(Icons.north_east_rounded, 'Pay', () => _go(const PayPersonScreen())),
               _action(Icons.call_received_rounded, 'Request', () => _go(const RequestPersonScreen())),
@@ -155,13 +223,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          _sayIt(),
+          KeyedSubtree(key: TourKeys.sayIt, child: _sayIt()),
           if (d.toPay.isNotEmpty) ...[
             const SizedBox(height: 16),
             _waiting(d.toPay),
           ],
           const SizedBox(height: 16),
           AiCard(
+            key: TourKeys.suggestion,
             title: d.suggestion.title,
             reasons: d.suggestion.reasons,
             actionLabel: d.suggestion.wallet == 'trip' ? 'Open the trip' : 'Pay someone',
@@ -170,6 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SectionTitle('People', action: 'Requests', onAction: () => _go(const RequestsScreen())),
           if (d.people.isEmpty)
             SurfaceCard(
+              key: TourKeys.people,
               child: Row(
                 children: [
                   const TileIcon(Icons.group_add_outlined),
@@ -180,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           else
             SizedBox(
+              key: TourKeys.people,
               height: 88,
               child: ListView(
                 scrollDirection: Axis.horizontal,
@@ -219,14 +290,14 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(28),
         onTap: () => _go(const QuickPayScreen()),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
             border: Border.all(color: AppColors.line),
           ),
           child: Row(
             children: [
-              const Icon(Icons.auto_awesome, size: 20, color: AppColors.amber500),
+              const AiMark(size: 26),
               const SizedBox(width: 10),
               Expanded(child: Text('Say it: "Pay Dev 200 for chai"', overflow: TextOverflow.ellipsis, style: AppText.body(color: AppColors.slate))),
               const Icon(Icons.keyboard_voice_outlined, size: 20, color: AppColors.slate),

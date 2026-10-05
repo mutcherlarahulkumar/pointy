@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../api.dart';
 import '../../session.dart';
 import '../../theme.dart';
+import '../../widgets/flow_scaffold.dart';
 import '../../widgets/pin_pad.dart';
 import '../../widgets/stepper.dart';
 import 'name.dart';
@@ -95,10 +96,17 @@ class _PinCreateScreenState extends State<PinCreateScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text('Step 3 of 3', style: AppText.small(color: AppColors.pine700, weight: FontWeight.w700)),
+                  const SizedBox(height: 4),
                   Text(_confirming ? 'Type it once more' : 'Create a 6-digit PIN', style: AppText.title()),
                   const SizedBox(height: 6),
                   Text(_confirming ? 'Just to be sure.' : 'You will use it to sign in. Keep it to yourself.',
                       style: AppText.body(color: AppColors.slate)),
+                  const SizedBox(height: 14),
+                  StepHint(
+                    icon: Icons.lock_rounded,
+                    text: _confirming ? 'Type the same 6 digits again.' : 'Pick 6 digits that are not in a row (not 123456) or all the same.',
+                  ),
                 ],
               ),
             ),

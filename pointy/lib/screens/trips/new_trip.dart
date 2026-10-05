@@ -53,6 +53,7 @@ class _NewTripScreenState extends State<NewTripScreen> {
       steps: _steps,
       step: 0,
       title: 'Where are you going?',
+      hint: 'Give the trip a name and the place.',
       buttonLabel: 'Continue',
       onNext: _name.text.trim().isEmpty
           ? null
@@ -113,6 +114,7 @@ class _DatesStepState extends State<_DatesStep> {
       steps: _steps,
       step: 1,
       title: 'When is it?',
+      hint: 'Pick the first and the last day of the trip.',
       buttonLabel: 'Continue',
       onNext: d == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => _PeopleStep(plan: widget.plan))),
       children: [
@@ -168,6 +170,7 @@ class _PeopleStepState extends State<_PeopleStep> {
       steps: _steps,
       step: 2,
       title: 'Who is coming?',
+      hint: 'Type a friend\'s mobile number and tap Add.',
       subtitle: 'Add friends by their mobile number. They need Pointy installed.',
       buttonLabel: n == 0 ? 'Just me for now' : 'Continue with ${n + 1} people',
       onNext: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => _MoneyStep(plan: widget.plan))),
@@ -239,6 +242,7 @@ class _MoneyStepState extends State<_MoneyStep> {
       steps: _steps,
       step: 3,
       title: 'How much does each person put in?',
+      hint: 'Set the deposit per person. The food budget is optional.',
       subtitle: 'Everyone adds this to the trip wallet. You can change plans later.',
       buttonLabel: 'Create ${p.name}',
       busy: _busy,

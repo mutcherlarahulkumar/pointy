@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'skeleton.dart';
 
-/// Shows a spinner while [future] loads, a retry message if it fails, and
-/// [builder] with the data once it arrives. A thin wrapper on FutureBuilder.
+/// Shows a pulsing outline of the page while [future] loads, a retry message
+/// if it fails, and [builder] with the data once it arrives, faded in. When
+/// [future] is replaced (a refresh), the old data stays on screen until the
+/// new data arrives. A thin wrapper on FutureBuilder.
 class AsyncView<T> extends StatelessWidget {
   const AsyncView({super.key, required this.future, required this.builder, this.onRetry});
 
@@ -16,9 +19,15 @@ class AsyncView<T> extends StatelessWidget {
     return FutureBuilder<T>(
       future: future,
       builder: (context, snap) {
-        if (snap.hasError) return ErrorView(message: '${snap.error}', onRetry: onRetry);
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        return builder(context, snap.data as T);
+        final Widget child;
+        if (snap.hasData && !(snap.hasError && snap.connectionState == ConnectionState.done)) {
+          child = KeyedSubtree(key: const ValueKey('data'), child: builder(context, snap.data as T));
+        } else if (snap.hasError) {
+          child = ErrorView(key: const ValueKey('error'), message: '${snap.error}', onRetry: onRetry);
+        } else {
+          child = const Skeleton(key: ValueKey('loading'));
+        }
+        return AnimatedSwitcher(duration: const Duration(milliseconds: 300), child: child);
       },
     );
   }

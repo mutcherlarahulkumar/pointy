@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'ai_mark.dart';
 import 'tag.dart';
 
 /// The yellow card with a spark icon. Every AI suggestion uses it, and it
@@ -36,11 +37,7 @@ class AiCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: AppColors.amber500, borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.auto_awesome, size: 18, color: AppColors.amber900),
-              ),
+              const AiMark(),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

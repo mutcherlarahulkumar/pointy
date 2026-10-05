@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../tabs.dart';
 import '../../api.dart';
 import '../../models.dart';
 import '../../money.dart';
 import '../../theme.dart';
+import '../../widgets/ai_mark.dart';
 import '../../widgets/ai_card.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/section_title.dart';
@@ -24,7 +26,7 @@ class InsightsScreen extends StatelessWidget {
           actions: [
             IconButton(
               tooltip: 'Suggestions',
-              icon: const Icon(Icons.auto_awesome_outlined),
+              icon: const AiMark(size: 28),
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SuggestionsScreen())),
             ),
             IconButton(
@@ -48,7 +50,10 @@ class _TripInsights extends StatefulWidget {
   State<_TripInsights> createState() => _TripInsightsState();
 }
 
-class _TripInsightsState extends State<_TripInsights> {
+class _TripInsightsState extends State<_TripInsights> with ReloadWhenShown {
+  @override
+  void reloadQuietly() => setState(() => _data = _load());
+
   late Future<(Trip, Insights)?> _data = _load();
 
   // The active trip, or the most recent one if none is on right now.
@@ -89,7 +94,10 @@ class _TripInsightsState extends State<_TripInsights> {
             Totals(spentPaise: i.spentPaise, eachPaise: i.perPersonPaise, leftPaise: i.leftPaise),
             BreakdownSection('By category', i.byCategory, labels: categoryLabel),
             BreakdownSection('By time of day', i.byTimeOfDay, labels: categoryLabel),
-            BreakdownSection('By place', [for (final b in i.byPlace) if (b.key.isNotEmpty && b.key != 'Unknown place') b]),
+            BreakdownSection('By place', [
+              for (final b in i.byPlace)
+                if (b.key.isNotEmpty && b.key != 'Unknown place') b
+            ]),
             BreakdownSection('By person', i.byPerson),
           ],
         );
@@ -105,7 +113,10 @@ class _PersonalInsights extends StatefulWidget {
   State<_PersonalInsights> createState() => _PersonalInsightsState();
 }
 
-class _PersonalInsightsState extends State<_PersonalInsights> {
+class _PersonalInsightsState extends State<_PersonalInsights> with ReloadWhenShown {
+  @override
+  void reloadQuietly() => setState(() => _history = api.history());
+
   late Future<List<HistoryItem>> _history = api.history();
 
   @override
@@ -135,7 +146,10 @@ class _PersonalInsightsState extends State<_PersonalInsights> {
                       '${top == null ? '' : '${categoryLabel(top.key)} is your biggest cost (${top.percent}%).'}',
             ),
             const SizedBox(height: 16),
-            Totals(spentPaise: spent, eachPaise: personalSpent, leftPaise: spent - personalSpent,
+            Totals(
+                spentPaise: spent,
+                eachPaise: personalSpent,
+                leftPaise: spent - personalSpent,
                 labels: const ['Your part', 'Personal', 'From trips']),
             BreakdownSection('By category', byCategory, labels: categoryLabel),
             BreakdownSection('By time of day', byTime, labels: categoryLabel),

@@ -24,6 +24,7 @@ class RequestPersonScreen extends StatelessWidget {
       steps: _steps,
       step: 0,
       title: 'Who should pay you?',
+      hint: 'Pick a friend, or type their mobile number.',
       buttonLabel: 'Choose someone above',
       onNext: null,
       children: [
@@ -92,6 +93,7 @@ class _RequestAmountScreenState extends State<RequestAmountScreen> {
       steps: _steps,
       step: 1,
       title: 'How much?',
+      hint: 'Type the amount and what it is for. They pay it from their app.',
       buttonLabel: paise == null ? 'Send request' : 'Ask for ${formatPaise(paise)}',
       busy: _busy,
       onNext: paise == null ? null : () => _send(paise),

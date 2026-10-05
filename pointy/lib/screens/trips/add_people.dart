@@ -39,6 +39,7 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
     return FlowScaffold(
       appBarTitle: widget.trip.name,
       title: 'Add people',
+      hint: 'Type a mobile number and tap Add.',
       subtitle: 'They see the trip on their phone straight away.',
       buttonLabel: _people.isEmpty ? 'Choose people' : 'Add ${_people.length}',
       busy: _busy,

@@ -35,6 +35,7 @@ class _NameScreenState extends State<NameScreen> {
       steps: signUpSteps,
       step: 1,
       title: 'What should friends call you?',
+      hint: 'Use the name your friends know you by.',
       subtitle: 'This is the name people see when you pay or ask them for money.',
       buttonLabel: 'Continue',
       onNext: _valid ? _next : null,

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
+import '../../money.dart';
 import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/ai_card.dart';
+import '../../widgets/ai_mark.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import 'pay_flow.dart';
@@ -73,7 +75,9 @@ class _QuickPayScreenState extends State<QuickPayScreen> {
     final r = _read;
     final canGo = r != null && _picked != null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Say it')),
+      appBar: AppBar(
+        title: const Row(children: [AiMark(size: 28), SizedBox(width: 10), Text('Say it')]),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -121,6 +125,10 @@ class _QuickPayScreenState extends State<QuickPayScreen> {
               title: r.reply,
               reasons: [r.isRequest ? 'Request' : 'Pay', r.source == 'ai' ? 'Read by AI' : 'Read by rules'],
             ),
+            if (_picked != null && r.amountPaise > 0) ...[
+              const SizedBox(height: 12),
+              _Preview(person: _picked!, amountPaise: r.amountPaise, note: r.note, request: r.isRequest),
+            ],
             if (r.choices.isNotEmpty) ...[
               const SizedBox(height: 12),
               for (final c in r.choices)
@@ -149,6 +157,40 @@ class _QuickPayScreenState extends State<QuickPayScreen> {
             child: Text(canGo ? 'Continue' : 'Read it'),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// What will happen if the person continues: who, how much, what for.
+class _Preview extends StatelessWidget {
+  const _Preview({required this.person, required this.amountPaise, required this.note, required this.request});
+
+  final Person person;
+  final int amountPaise;
+  final String note;
+  final bool request;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16)),
+      child: Row(
+        children: [
+          Avatar(person.name, size: 48),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(request ? 'Ask ${person.name}' : 'Pay ${person.name}', style: AppText.body(weight: FontWeight.w600)),
+                Text(note.isEmpty ? '+91 ${formatPhone(person.phone)}' : note, style: AppText.detail()),
+              ],
+            ),
+          ),
+          Text(formatPaise(amountPaise), style: AppText.heading(color: request ? AppColors.pending : AppColors.pine700)),
+        ],
       ),
     );
   }

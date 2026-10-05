@@ -9,6 +9,7 @@ import '../../models.dart';
 import '../../prefs.dart';
 import '../../theme.dart';
 import '../../widgets/ai_card.dart';
+import '../../widgets/ai_mark.dart';
 import '../../widgets/amount_field.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
@@ -175,6 +176,7 @@ class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
       steps: _steps,
       step: 0,
       title: 'What was it?',
+      hint: 'Type the amount and what it was for, or scan the bill.',
       buttonLabel: 'Continue',
       onNext: paise == null || _what.text.trim().isEmpty
           ? null
@@ -185,12 +187,10 @@ class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => _WhoPaidScreen(d: _d)));
             },
       children: [
-        OutlinedButton.icon(
-          onPressed: _scanning ? null : _chooseSource,
-          icon: _scanning
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.document_scanner_outlined),
-          label: Text(_scanning ? 'Reading the receipt…' : 'Scan a receipt'),
+        AiButton(
+          label: _scanning ? 'Reading the receipt…' : 'Scan a receipt with AI',
+          busy: _scanning,
+          onPressed: _chooseSource,
         ),
         if (_scanned != null) ...[
           const SizedBox(height: 10),
@@ -270,6 +270,7 @@ class _WhoPaidScreenState extends State<_WhoPaidScreen> {
       steps: _steps,
       step: 1,
       title: 'Who gets the money?',
+      hint: 'Choose who receives the money from the trip wallet.',
       subtitle: '${formatPaise(d.amountPaise)} for ${d.description}',
       buttonLabel: 'Continue',
       onNext: ok
@@ -380,6 +381,7 @@ class _SplitScreenState extends State<_SplitScreen> {
       steps: _steps,
       step: 2,
       title: 'How do you split it?',
+      hint: 'Choose how to share it, and tick who is in.',
       buttonLabel: 'Continue',
       onNext: shares == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => _ReviewScreen(d: d))),
       children: [
@@ -521,6 +523,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       steps: _steps,
       step: 3,
       title: 'Check and pay',
+      hint: 'Check everything. You confirm with your fingerprint or PIN.',
       buttonLabel: 'Pay ${formatPaise(d.amountPaise)} from the wallet',
       busy: _busy,
       onNext: _pay,

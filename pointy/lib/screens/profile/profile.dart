@@ -5,6 +5,7 @@ import '../../models.dart';
 import '../../payment_lock.dart';
 import '../../session.dart';
 import '../../theme.dart';
+import '../../tour.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/section_title.dart';
@@ -99,6 +100,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             tile(Icons.tune_rounded, 'What the AI may use', 'Choose what suggestions can look at', () => go(const AiSettingsScreen())),
+            tile(Icons.explore_outlined, 'Take the tour', 'What each part of the app does, step by step', () => startTour(context)),
             tile(Icons.info_outline_rounded, 'How Pointy works in India', 'Where PayPal fits in', () => go(const HowItWorksScreen())),
             const SizedBox(height: 8),
             Text('Server: ${api.baseUrl} · PayPal: ${me.paypalMode}', textAlign: TextAlign.center, style: AppText.small()),
