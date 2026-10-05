@@ -57,8 +57,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
   void initState() {
     super.initState();
     _messages.add(_Message.bot(
-      'Hi! Tell me how much to collect and by when, like “Collect ₹3,000 from everyone by 20 Oct”. '
-      'I draft a request for each person and wait for your OK before sending anything.',
+      'Hi! Tell me how much to collect and from whom, in your own words, like “Collect ₹3,000 from everyone by 20 Oct” '
+      'or “ask Dev and Meera for 2k by Friday”. I draft the requests and wait for your OK before sending anything.',
     ));
   }
 
@@ -83,7 +83,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _toEnd();
     try {
       final plan = await api.draftPlan(widget.trip.id, text.trim());
-      setState(() => _messages.add(_Message.plan(plan)));
+      setState(() {
+        // The model's reply comes first, like a chat, then the plan to approve.
+        if (plan.note.isNotEmpty) _messages.add(_Message.bot(plan.note));
+        _messages.add(_Message.plan(plan));
+      });
     } on ApiException catch (e) {
       setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {

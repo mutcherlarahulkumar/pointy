@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/ai"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
 )
 
@@ -135,23 +138,71 @@ func parseInstruction(text string, t *domain.Trip, now time.Time) (Paise, time.T
 	return amount, due
 }
 
-// DraftPlan turns an instruction into a plan. It sends nothing.
-func (s *Service) DraftPlan(tripID, userID, instruction string) (*domain.Plan, error) {
+// DraftPlan turns an instruction into a plan. It sends nothing. With a
+// language model configured it understands free-form requests ("ask Dev and
+// Meera for 2k by Friday"), including asking only some people; otherwise, or
+// if the model fails, a rule-based reader handles the common phrasings.
+func (s *Service) DraftPlan(ctx context.Context, tripID, userID, instruction string) (*domain.Plan, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	t, err := s.openTripL(tripID, userID)
+	if err == nil && t.OrganiserID != userID {
+		err = domain.Forbidden("only the organiser can collect deposits")
+	}
 	if err != nil {
+		s.mu.Unlock()
 		return nil, err
 	}
-	if t.OrganiserID != userID {
-		return nil, domain.Forbidden("only the organiser can collect deposits")
+	assistant := s.ai
+	input := ai.InstructionInput{Text: instruction, TripName: t.Name, TripStart: t.Start.In(IST).Format("2006-01-02"),
+		Today: s.now().In(IST).Format("2006-01-02 (Monday)"), Organiser: s.name(userID)}
+	if t.DepositTarget > 0 {
+		input.DefaultAmount = INR(t.DepositTarget)
+	}
+	for _, m := range t.Members {
+		input.Members = append(input.Members, s.name(m))
+	}
+	s.mu.Unlock()
+
+	var read *ai.Instruction
+	if assistant != nil {
+		cctx, cancel := context.WithTimeout(ctx, aiTimeout)
+		got, aerr := assistant.ParseInstruction(cctx, input)
+		cancel()
+		if aerr != nil {
+			log.Printf("ai instruction for %s: %v (using the rules)", tripID, aerr)
+		} else {
+			read = &got
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, err = s.openTripL(tripID, userID); err != nil {
+		return nil, err
 	}
 	per, due := parseInstruction(instruction, t, s.now())
+	p := &domain.Plan{ID: s.idL("plan"), TripID: tripID, Instruction: instruction, Status: "draft", Source: "rules"}
+	who := t.Members
+	if read != nil {
+		if !read.Understood {
+			return nil, domain.Invalid("%s", firstNonEmpty(read.Reply, "say how much each person should put in, for example ₹3,000"))
+		}
+		if v, ok := ai.ParseRupees(read.PerPerson); ok && v > 0 {
+			per = Paise(v)
+		}
+		if d, derr := time.ParseInLocation("2006-01-02", read.DueDate, IST); derr == nil && !d.Before(startOfDay(s.now())) {
+			due = d
+		}
+		if picked := s.membersByNameL(t, read.MemberNames); len(picked) > 0 {
+			who = picked
+		}
+		p.Note, p.Source = read.Reply, "ai"
+	}
 	if per <= 0 || per > MaxAmount {
 		return nil, domain.Invalid("say how much each person should put in, for example ₹3,000")
 	}
-	p := &domain.Plan{ID: s.idL("plan"), TripID: tripID, Instruction: instruction, PerPerson: per, Due: due, Status: "draft"}
-	for _, uid := range t.Members {
+	p.PerPerson, p.Due = per, due
+	for _, uid := range who {
 		_, paid := s.ledger.Totals(domain.ShareAccount(tripID, uid), "deposit")
 		it := domain.PlanItem{UserID: uid, Name: s.name(uid), Amount: per - paid, Channel: "request"}
 		switch {
@@ -169,6 +220,27 @@ func (s *Service) DraftPlan(tripID, userID, instruction string) (*domain.Plan, e
 		return nil, err
 	}
 	return p, nil
+}
+
+// membersByNameL maps names the model returned to trip members, matching the
+// full name or the first name without case. Unknown names are ignored.
+func (s *Service) membersByNameL(t *domain.Trip, names []string) []string {
+	var out []string
+	for _, n := range names {
+		n = strings.ToLower(strings.TrimSpace(n))
+		for _, m := range t.Members {
+			full := strings.ToLower(s.name(m))
+			if n != "" && (full == n || strings.Fields(full)[0] == n) && !contains(out, m) {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.In(IST).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, IST)
 }
 
 // ConfirmPlan is the human yes. Only now does each member get a request on

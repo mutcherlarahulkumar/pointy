@@ -303,10 +303,10 @@ func TestAssistantRequestsArePaidInApp(t *testing.T) {
 	a := register(t, s, "Asha", "9876543210")
 	d := register(t, s, "Dev", "9123456780")
 	trip := goa(t, s, a, d)
-	if _, err := s.DraftPlan(trip, d, "Collect ₹3,000"); code(err) != "forbidden" {
+	if _, err := s.DraftPlan(context.Background(), trip, d, "Collect ₹3,000"); code(err) != "forbidden" {
 		t.Fatal("only the organiser drafts")
 	}
-	p := must[*domain.Plan](t)(s.DraftPlan(trip, a, "Collect ₹3,000 from everyone by 20 Oct"))
+	p := must[*domain.Plan](t)(s.DraftPlan(context.Background(), trip, a, "Collect ₹3,000 from everyone by 20 Oct"))
 	if p.PerPerson != domain.Rupees(3000) || p.Due.Day() != 20 || len(s.requests) != 0 {
 		t.Fatalf("plan %+v; nothing may be sent before confirm", p)
 	}
@@ -335,7 +335,7 @@ func TestPayPalDepositClosesRequest(t *testing.T) {
 	a := register(t, s, "Asha", "9876543210")
 	d := register(t, s, "Dev", "9123456780")
 	trip := goa(t, s, a, d)
-	p := must[*domain.Plan](t)(s.DraftPlan(trip, a, "Collect ₹3,000"))
+	p := must[*domain.Plan](t)(s.DraftPlan(context.Background(), trip, a, "Collect ₹3,000"))
 	made := must[[]*domain.DepositRequest](t)(s.ConfirmPlan(trip, p.ID, a))
 	dep := must[*domain.Deposit](t)(s.StartDeposit(context.Background(), trip, d, domain.Rupees(3000)))
 	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), dep.OrderID))
@@ -348,7 +348,10 @@ func TestPayPalDepositClosesRequest(t *testing.T) {
 // the service rebuilds the same state after a restart.
 type memStore struct{ saved []any }
 
-func (m *memStore) Save(_ context.Context, items []any) error { m.saved = append(m.saved, items...); return nil }
+func (m *memStore) Save(_ context.Context, items []any) error {
+	m.saved = append(m.saved, items...)
+	return nil
+}
 func (m *memStore) Load(context.Context) (*Snapshot, error) {
 	s := &Snapshot{}
 	seen := map[any]bool{}

@@ -21,15 +21,15 @@ import (
 // accounts, so every amount is converted to Currency (USD by default, for a
 // US sandbox business account) at a fixed demo rate before it is sent.
 type Sandbox struct {
-	BaseURL      string // https://api-m.sandbox.paypal.com
-	ClientID     string
-	Secret       string
-	WebhookID    string
-	Currency     string  // e.g. USD
-	INRPerUnit   float64 // demo rate: how many rupees one unit of Currency costs
-	ReturnURL    string
-	CancelURL    string
-	HTTP         *http.Client
+	BaseURL    string // https://api-m.sandbox.paypal.com
+	ClientID   string
+	Secret     string
+	WebhookID  string
+	Currency   string  // e.g. USD
+	INRPerUnit float64 // demo rate: how many rupees one unit of Currency costs
+	ReturnURL  string
+	CancelURL  string
+	HTTP       *http.Client
 
 	mu      sync.Mutex
 	token   string

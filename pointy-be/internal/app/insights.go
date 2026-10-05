@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/ai"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
 )
 
@@ -117,7 +120,21 @@ type Insights struct {
 	ByPlace      []Bucket `json:"by_place"`
 	ByPerson     []Bucket `json:"by_person"`
 	Summary      string   `json:"summary"`
+	Tip          string   `json:"tip,omitempty"`
+	// SummarySource is "ai" when a language model wrote the summary, else "rules".
+	SummarySource string `json:"summary_source"`
 }
+
+// cachedSummary is the last AI summary for a trip, reused until the numbers
+// it was written from change.
+type cachedSummary struct {
+	key  string
+	text ai.Summary
+}
+
+// aiTimeout bounds how long a screen waits for the model before showing the
+// rule-based answer instead.
+const aiTimeout = 20 * time.Second
 
 // TimeOfDay buckets a clock time. It uses the time zone the payment was made
 // in, which is carried in the timestamp the app sends.
@@ -155,12 +172,43 @@ func buckets(m map[string]Paise, total Paise, order []string) []Bucket {
 	return out
 }
 
-func (s *Service) Insights(tripID, userID string) (Insights, error) {
+// Insights works out the trip's numbers and a written summary. With a
+// language model configured the summary is written by it (and cached until
+// the numbers change); otherwise, or if the model fails, a template writes it.
+func (s *Service) Insights(ctx context.Context, tripID, userID string) (Insights, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	in, facts, err := s.insightsL(tripID, userID)
+	assistant := s.ai
+	cached, hit := s.aiSummaries[tripID]
+	s.mu.Unlock()
+	if err != nil || assistant == nil || in.Spent == 0 {
+		return in, err
+	}
+	key := fmt.Sprintf("%d|%d|%d|%d", in.Spent, in.Left, in.Day, len(in.ByPerson))
+	if hit && cached.key == key {
+		in.Summary, in.Tip, in.SummarySource = cached.text.Text, cached.text.Tip, "ai"
+		return in, nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, aiTimeout)
+	defer cancel()
+	sum, aerr := assistant.Summarize(cctx, facts)
+	if aerr != nil || strings.TrimSpace(sum.Text) == "" {
+		if aerr != nil {
+			log.Printf("ai summary for %s: %v (using the template)", tripID, aerr)
+		}
+		return in, nil
+	}
+	s.mu.Lock()
+	s.aiSummaries[tripID] = cachedSummary{key: key, text: sum}
+	s.mu.Unlock()
+	in.Summary, in.Tip, in.SummarySource = sum.Text, sum.Tip, "ai"
+	return in, nil
+}
+
+func (s *Service) insightsL(tripID, userID string) (Insights, ai.TripFacts, error) {
 	t, err := s.tripL(tripID, userID)
 	if err != nil {
-		return Insights{}, err
+		return Insights{}, ai.TripFacts{}, err
 	}
 	cat, tod, place, person := map[string]Paise{}, map[string]Paise{}, map[string]Paise{}, map[string]Paise{}
 	var in Insights
@@ -204,8 +252,26 @@ func (s *Service) Insights(tripID, userID string) (Insights, error) {
 			fmt.Fprintf(&b, "At this pace the wallet runs %s short.", INR(-in.ForecastLeft))
 		}
 	}
-	in.Summary = b.String()
-	return in, nil
+	in.Summary, in.SummarySource = b.String(), "rules"
+
+	lines := func(bs []Bucket) []ai.Line {
+		out := []ai.Line{}
+		for _, x := range bs {
+			out = append(out, ai.Line{Key: x.Key, Amount: INR(x.Amount), Percent: x.Percent})
+		}
+		return out
+	}
+	facts := ai.TripFacts{TripName: t.Name, Place: t.Place, Day: in.Day, Days: in.Days, People: len(t.Members),
+		Spent: INR(in.Spent), PerPerson: INR(in.PerPerson), Left: INR(in.Left), DailyPace: INR(in.DailyPace), ForecastLeft: INR(in.ForecastLeft),
+		ByCategory: lines(in.ByCategory), ByTimeOfDay: lines(in.ByTimeOfDay), ByPlace: lines(in.ByPlace), ByPerson: lines(in.ByPerson)}
+	for _, c := range domain.Categories {
+		if limit := t.Budgets[c]; limit > 0 {
+			used := cat[string(c)]
+			facts.Budgets = append(facts.Budgets, ai.BudgetLine{Category: string(c), Limit: INR(limit), Used: INR(used), Percent: pct(used, limit),
+				AheadOfPace: in.Days > 0 && in.Day > 0 && int64(used)*int64(in.Days) > int64(limit)*int64(in.Day)})
+		}
+	}
+	return in, facts, nil
 }
 
 func biggest(b []Bucket) string {
