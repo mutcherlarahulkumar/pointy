@@ -30,6 +30,9 @@ The backend service needs these environment variables:
 | `PAYPAL_CURRENCY` | `USD` |
 | `POINTY_INR_PER_UNIT` | `85` (rupees per dollar used for conversion) |
 | `PAYPAL_WEBHOOK_ID` | optional |
+| `GROQ_API_KEY` | optional: turns on AI trip summaries, the free-form deposit assistant and receipt scanning (Groq) |
+| `POINTY_AI_MODEL` | optional, default `openai/gpt-oss-120b` |
+| `POINTY_AI_VISION_MODEL` | optional, model that reads receipt photos, default `meta-llama/llama-4-scout-17b-16e-instruct` |
 
 Build command `go build -o bin/server ./cmd/server`, start command `./bin/server`, root directory `pointy-be`, health check `/health`. `POINTY_SEED` and `POINTY_CLOCK` are no longer used.
 

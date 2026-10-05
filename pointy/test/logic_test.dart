@@ -26,6 +26,13 @@ void main() {
     expect(guessCategory('Sunscreen'), isNull);
   });
 
+  test('reads a scanned receipt from the API', () {
+    final r = ScannedReceipt.fromJson({'amount_paise': 184050, 'merchant': "Britto's", 'category': 'food', 'description': "Dinner at Britto's", 'date': '2026-10-12'});
+    expect(r.amountPaise, 184050);
+    expect(r.category, 'food');
+    expect(r.merchant, "Britto's");
+  });
+
   test('names, initials and phone formatting', () {
     expect(firstName('  Asha   Rao '), 'Asha');
     expect(initials('asha rao'), 'AR');

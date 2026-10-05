@@ -27,6 +27,8 @@ services:
         value: "85"
       - key: PAYPAL_WEBHOOK_ID
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
 
 databases:
   - name: pointy-db

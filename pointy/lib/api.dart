@@ -138,6 +138,10 @@ class ApiClient {
   Future<List<AlertItem>> alerts() async => (await _arr('GET', '/api/alerts')).map(AlertItem.fromJson).toList();
   Future<void> markAlertsSeen() async => _send('POST', '/api/alerts/seen');
 
+  /// Reads a photo of a bill (JPEG or PNG bytes) into expense fields.
+  Future<ScannedReceipt> scanReceipt(List<int> imageBytes) async =>
+      ScannedReceipt.fromJson(await _obj('POST', '/api/receipts/scan', body: {'image_base64': base64Encode(imageBytes)}));
+
   // Trips
   Future<List<Trip>> trips() async => (await _arr('GET', '/api/trips')).map(Trip.fromJson).toList();
   Future<Trip> trip(String id) async => Trip.fromJson(await _obj('GET', '/api/trips/$id'));

@@ -46,7 +46,9 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Pointy uses the camera to scan payee QR codes.</string>
+	<string>Pointy uses the camera to scan payee QR codes and receipts.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pointy reads a receipt photo you choose to fill in an expense.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Pointy reads a rough location when you pay, to suggest the category and wallet.</string>
 	<key>NSAppTransportSecurity</key>

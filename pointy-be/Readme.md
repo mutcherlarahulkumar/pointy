@@ -53,6 +53,17 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 
 Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `wrong_pin`, `too_many_attempts`, `signed_out`.
 
+## AI features (optional)
+
+With `GROQ_API_KEY` set, `internal/ai` uses Groq's OpenAI-compatible chat API (`openai/gpt-oss-120b` by default, `POINTY_AI_MODEL` to change it):
+
+- **Trip summaries**: Insights gets a plain-words summary and one tip, written from pre-formatted numbers (the model never does money arithmetic). Cached per trip until the numbers change.
+- **Deposit assistant**: free-form instructions such as "ask Dev and Meera for 2k by Friday" become a plan for just those people. The model only drafts; the organiser still confirms before anything is sent.
+
+- **Receipt scanning**: `POST /api/receipts/scan` with `{"image_base64": "..."}` (JPEG/PNG, up to 3 MB) returns the total in paise, merchant, date, category and a short description. Read by Groq's vision model (`POINTY_AI_VISION_MODEL`, default `meta-llama/llama-4-scout-17b-16e-instruct`). Nothing is saved; the app fills the expense form and the person checks it. Non-rupee bills and photos that are not receipts are turned away. Answers `503 ai_off` when no key is set.
+
+Requests ask for JSON matching a schema; on the gpt-oss models Groq enforces it strictly (constrained decoding), and answers are validated either way. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
+
 ## PayPal sandbox
 
 1. In the PayPal developer dashboard create a sandbox **business** account and a **personal** account, both with country **United States**, and a REST app on the business account.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/ai"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/app"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/config"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/httpapi"
@@ -46,6 +47,14 @@ func main() {
 	}
 
 	svc := app.New(pp, func() time.Time { return time.Now().In(app.IST) }, st)
+
+	// Language-model features (trip summaries, the deposit assistant) turn on
+	// when a Groq API key is set; without one they use rules.
+	if key := env("GROQ_API_KEY", ""); key != "" {
+		g := ai.NewGroq(key, env("POINTY_AI_MODEL", ""), env("POINTY_AI_VISION_MODEL", ""))
+		svc.SetAssistant(g)
+		log.Printf("AI features on (Groq, model %s)", env("POINTY_AI_MODEL", ai.DefaultModel))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	if err := svc.Load(ctx); err != nil {
 		log.Fatal(err)

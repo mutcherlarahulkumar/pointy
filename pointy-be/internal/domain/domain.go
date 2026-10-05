@@ -38,10 +38,10 @@ func Conflict(code, msg string, details any) *Error {
 }
 
 type User struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Phone       string    `json:"phone,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Phone     string    `json:"phone,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 	// PinHash is a bcrypt hash of the 6-digit PIN. It is never sent out.
 	PinHash string `json:"-"`
 	// AlertsSeenAt is when the person last opened their alerts, for the
@@ -170,8 +170,8 @@ type Expense struct {
 	Description string    `json:"description"`
 	Category    Category  `json:"category"`
 	Amount      Paise     `json:"amount_paise"`
-	Mode        string    `json:"mode"`  // trip: member or reimburse; personal: transfer
-	Payee       string    `json:"payee"` // who was paid, as shown on the receipt
+	Mode        string    `json:"mode"`          // trip: member or reimburse; personal: transfer
+	Payee       string    `json:"payee"`         // who was paid, as shown on the receipt
 	PayeeUserID string    `json:"payee_user_id"` // the Pointy user whose balance received the money
 	Shares      []Share   `json:"shares"`
 	PlaceName   string    `json:"place_name"`
@@ -213,6 +213,10 @@ type Plan struct {
 	Total       Paise      `json:"total_paise"`
 	Status      string     `json:"status"` // draft, confirmed
 	ConfirmedBy string     `json:"confirmed_by,omitempty"`
+	// Note is the assistant's one-line reply shown above the plan, and
+	// Source says who read the instruction: "ai" or "rules".
+	Note   string `json:"note,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 type Alert struct {
