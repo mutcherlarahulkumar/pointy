@@ -79,7 +79,7 @@ class _TripInsightsState extends State<_TripInsights> {
             AiCard(
               title: 'Summary',
               body: i.summary,
-              reasons: [i.summarySource == 'ai' ? 'Written by Claude' : 'From your numbers'],
+              reasons: [i.summarySource == 'ai' ? 'Written by AI' : 'From your numbers'],
             ),
             if (i.tip.isNotEmpty) ...[
               const SizedBox(height: 10),

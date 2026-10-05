@@ -27,7 +27,7 @@ services:
         value: "85"
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: GROQ_API_KEY
         sync: false
 
 databases:

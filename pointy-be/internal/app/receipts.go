@@ -12,8 +12,9 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
 )
 
-// MaxReceiptBytes caps an uploaded receipt photo.
-const MaxReceiptBytes = 5 << 20
+// MaxReceiptBytes caps an uploaded receipt photo. Groq accepts base64 image
+// requests up to 4 MB, and base64 is a third larger than the file.
+const MaxReceiptBytes = 3 << 20
 
 // ScannedReceipt is a receipt read into the fields of an expense. Nothing is
 // saved: the app fills the form and the person checks it before paying.
@@ -37,7 +38,7 @@ func (s *Service) ScanReceipt(ctx context.Context, image []byte) (ScannedReceipt
 		return ScannedReceipt{}, &domain.Error{Status: http.StatusServiceUnavailable, Code: "ai_off", Message: "receipt scanning is not set up on this server"}
 	}
 	if len(image) == 0 || len(image) > MaxReceiptBytes {
-		return ScannedReceipt{}, domain.Invalid("send a photo under 5 MB")
+		return ScannedReceipt{}, domain.Invalid("send a photo under 3 MB")
 	}
 	// Trust the bytes, not what the phone says the file is.
 	mediaType := http.DetectContentType(image)
