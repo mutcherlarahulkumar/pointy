@@ -128,8 +128,8 @@ ThemeData buildTheme() {
       ),
     ),
     // Pages slide and fade in the same way everywhere.
-    pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+    pageTransitionsTheme: PageTransitionsTheme(builders: {
+      for (final p in TargetPlatform.values) p: const SmoothPageTransitionsBuilder(),
     }),
     dividerTheme: const DividerThemeData(color: AppColors.line, space: 1),
     chipTheme: base.chipTheme.copyWith(
@@ -147,4 +147,30 @@ ThemeData buildTheme() {
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? AppColors.pine700 : null),
     ),
   );
+}
+
+/// Every screen opens the same calm way: it fades in while sliding a short
+/// distance from the right, and the screen underneath fades back a little.
+/// Back reverses it.
+class SmoothPageTransitionsBuilder extends PageTransitionsBuilder {
+  const SmoothPageTransitionsBuilder();
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 320);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 260);
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
+    final inCurve = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final outCurve = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0.6).animate(outCurve),
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0.06, 0), end: Offset.zero).animate(inCurve),
+        child: FadeTransition(opacity: inCurve, child: child),
+      ),
+    );
+  }
 }

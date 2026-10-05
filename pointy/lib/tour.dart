@@ -13,7 +13,6 @@ class TourKeys {
   static final addMoney = GlobalKey(debugLabel: 'tour-add-money');
   static final myQr = GlobalKey(debugLabel: 'tour-my-qr');
   static final actions = GlobalKey(debugLabel: 'tour-actions');
-  static final sayIt = GlobalKey(debugLabel: 'tour-say-it');
   static final ai = GlobalKey(debugLabel: 'tour-ai');
   static final suggestion = GlobalKey(debugLabel: 'tour-suggestion');
   static final people = GlobalKey(debugLabel: 'tour-people');
@@ -49,12 +48,9 @@ final homeTour = <TourStep>[
       'Pointy creates a PayPal order, you approve it on PayPal, and when PayPal confirms, your balance is credited exactly once, even if PayPal tells us twice.'),
   TourStep(TourKeys.myQr, Icons.qr_code_2_rounded, 'Your QR', 'Friends scan it to pay you. It works between any two Pointy phones.',
       'Money between people never leaves Pointy, so it is instant and free.'),
-  TourStep(TourKeys.actions, Icons.bolt_rounded, 'Pay, request, split, scan',
+  TourStep(TourKeys.actions, Icons.bolt_rounded, 'Pay, request, split',
       'Each opens a short form, one step at a time. You confirm every payment with your fingerprint or PIN.',
       'Each payment carries a one-time key, so a double tap or a retry on a bad network can never pay twice.'),
-  TourStep(TourKeys.sayIt, aiIcon, 'Pointy AI',
-      'Ask about your money ("what did I spend this week?", "who owes me?") or say a payment ("pay Dev 200 for chai").',
-      'It answers from your own account in the database, and remembers the chat. A payment it suggests only opens the confirm screen: it never pays on its own. Without an AI key, simple rules answer.', true),
   TourStep(TourKeys.suggestion, aiIcon, 'AI suggestions',
       'A yellow card with the ✦ sparkle is an idea from the AI, from the time, the place and your trips. Nothing happens until you tap it.',
       'Choose what the AI may look at in Profile → What the AI may use.', true),
@@ -69,7 +65,9 @@ final homeTour = <TourStep>[
   TourStep(TourKeys.insights, Icons.insights_rounded, 'Insights',
       'Where the money went: by category, time of day, place and person, with a summary and a tip written by the AI.', null, true),
   TourStep(TourKeys.history, Icons.receipt_long_rounded, 'History', 'Every payment, newest first, tagged Trip or Personal.'),
-  TourStep(TourKeys.ai, aiIcon, 'Ask AI, anywhere', 'This glowing button opens Pointy AI from every tab.', null, true),
+  TourStep(TourKeys.ai, aiIcon, 'Ask AI, anywhere',
+      'Ask about your money ("what did I spend this week?", "who owes me?") or say a payment ("pay Dev 200 for chai"). This button opens it from every tab.',
+      'It answers from your own account in the database, and remembers the chat. A payment it suggests only opens the confirm screen: it never pays on its own. Without an AI key, simple rules answer.', true),
 ];
 
 /// Remembers whether the tour has been offered on this phone.

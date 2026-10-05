@@ -107,7 +107,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         if (i >= 0) _messages[i] = _Message.plan(plan.withStatus('confirmed'));
         _messages.add(_Message.bot(sent == 0
             ? 'Nothing new to send: everyone has already paid.'
-            : 'Sent $sent request${sent == 1 ? '' : 's'}. Each person sees it on their phone and can pay from their balance or with PayPal. '
+            : 'Sent $sent request${sent == 1 ? '' : 's'}. Each person sees it on their phone and pays from their Pointy balance. '
                 'I mark them paid as the money comes in.'));
       });
     } on ApiException catch (e) {

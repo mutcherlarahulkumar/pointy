@@ -12,8 +12,8 @@ import '../../widgets/section_title.dart';
 import '../../widgets/success.dart';
 import 'paypal_account.dart';
 
-/// Withdraw: your Pointy balance to your PayPal account, as a real PayPal
-/// payout from Pointy's business account.
+/// Withdraw: money out of your Pointy wallet to your PayPal account, from
+/// where you move it to your bank. The only place money leaves Pointy.
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({super.key});
 
@@ -77,9 +77,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         final linked = me.paypalEmail.isNotEmpty;
         return FlowScaffold(
           appBarTitle: 'Withdraw',
-          title: 'Withdraw to PayPal',
+          title: 'Withdraw to your bank',
           subtitle: 'You have ${formatPaise(me.personalBalancePaise)} in your Pointy balance.',
-          hint: linked ? 'Pick an amount. It goes to your PayPal account by PayPal Payouts.' : 'First add the PayPal account to send it to.',
+          hint: linked ? 'Pick an amount. It goes to your PayPal account; from there, move it to your bank.' : 'First add the PayPal account to send it to.',
           buttonLabel: !linked
               ? 'Add your PayPal email'
               : tooMuch

@@ -4,8 +4,9 @@ import '../theme.dart';
 import 'stepper.dart';
 
 /// The frame every multi-step form shares: a progress bar with an icon per
-/// step, "Step 2 of 3", one question as the title, a tip saying what to do
-/// on this step, the content, and one button at the bottom.
+/// step, "Step 2 of 3", one question as the title, one line of help (the
+/// subtitle, or else a tip saying what to do), the content, and one button at
+/// the bottom.
 class FlowScaffold extends StatelessWidget {
   const FlowScaffold({
     super.key,
@@ -65,7 +66,9 @@ class FlowScaffold extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(subtitle!, style: AppText.body(color: AppColors.slate)),
                   ],
-                  if (hint != null) ...[
+                  // One line of help is enough: the tip only shows when there is
+                  // no subtitle.
+                  if (hint != null && subtitle == null) ...[
                     const SizedBox(height: 14),
                     StepHint(icon: steps == null ? Icons.lightbulb_outline_rounded : (stepIcons[steps![step]] ?? Icons.lightbulb_outline_rounded), text: hint!),
                   ],

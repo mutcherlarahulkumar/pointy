@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:pointy/api.dart';
 import 'package:pointy/payment_lock.dart';
-import 'package:pointy/screens/money/where_money.dart';
 import 'package:pointy/screens/money/withdraw.dart';
 import 'package:pointy/theme.dart';
 
@@ -72,25 +71,5 @@ void main() {
     expect(jsonDecode(sent.last.body), {'amount_paise': 50000});
     expect(find.text('Sent to your PayPal'), findsOneWidget);
     expect(find.text('BATCH-123'), findsOneWidget);
-  });
-
-  testWidgets('where is my money shows the business account and payouts', (tester) async {
-    phone(tester);
-    api = fakeApi(overrides: {
-      'GET /api/money': (
-        200,
-        '{"paypal_mode":"sandbox","paypal_email":"asha@example.com","business_account_paise":1500000,"owed_to_everyone_paise":1500000,'
-            '"balanced":true,"your_balance_paise":150000,"your_trip_shares_paise":240000,"you_paid_in_paise":500000,"you_paid_out_paise":50000,'
-            '"payouts":[$_payout]}'
-      ),
-    });
-    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const WhereMoneyScreen()));
-    await tester.pumpAndSettle();
-    expect(find.text('Pointy\'s PayPal business account'), findsOneWidget);
-    expect(find.textContaining('₹15,000 for everyone'), findsOneWidget);
-    expect(find.text('Books match'), findsOneWidget);
-    expect(find.text('₹1,500'), findsOneWidget); // your balance
-    await tester.scrollUntilVisible(find.text('Withdrawal to PayPal'), 200, scrollable: find.byType(Scrollable).first);
-    expect(find.text('Paid'), findsOneWidget);
   });
 }

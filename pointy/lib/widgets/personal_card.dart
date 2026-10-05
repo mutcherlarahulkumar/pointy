@@ -51,7 +51,7 @@ class PersonalCard extends StatelessWidget {
           if (caption != null) Text(caption!, style: AppText.small(color: AppColors.personalBg)),
           if (actions.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Row(children: [for (var i = 0; i < actions.length; i++) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: actions[i])]]),
+            Row(children: [for (var i = 0; i < actions.length; i++) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: actions[i])]]),
           ],
         ],
       ),

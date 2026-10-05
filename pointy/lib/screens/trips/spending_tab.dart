@@ -10,7 +10,7 @@ import '../../widgets/empty_state.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/tile_icon.dart';
 
-/// Spending tab: what the group spent, per person, and every expense.
+/// Spent tab: what the group spent and each payment, newest first.
 class SpendingTab extends StatefulWidget {
   const SpendingTab({super.key, required this.trip});
 
@@ -36,78 +36,58 @@ class _SpendingTabState extends State<SpendingTab> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              SurfaceCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Spent by the group', style: AppText.detail()),
-                          Text(formatPaise(t.spentPaise), style: AppText.balance()),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('${expenses.length}', style: AppText.title()),
-                        Text('payments', style: AppText.detail()),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SectionTitle('Per person'),
-              SurfaceCard(
-                child: Column(
-                  children: [
-                    for (final m in t.memberDetails)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 5),
-                        child: Row(
-                          children: [
-                            Expanded(child: Text(m.user.name, style: AppText.body())),
-                            Text(formatPaise(m.usedPaise), style: AppText.body(weight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SectionTitle('Every expense'),
               if (newestFirst.isEmpty)
-                const EmptyState(icon: Icons.receipt_long_outlined, title: 'Nothing spent yet', body: 'Add an expense from the Wallet tab.'),
-              for (final e in newestFirst)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Card(
-                    child: ListTile(
-                      leading: TileIcon(categoryIcon(e.category)),
-                      title: Text(e.description, style: AppText.body(weight: FontWeight.w600)),
-                      subtitle: Text(
-                        '${formatDateTime(e.at)}\n${e.mode == 'reimburse' ? 'Paid back to ${t.nameOf(e.payeeUserId)}' : 'Paid to ${e.payee}'}',
-                        style: AppText.detail(),
-                      ),
-                      isThreeLine: true,
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(formatPaise(e.amountPaise), style: AppText.body(weight: FontWeight.w700)),
-                          Text(
-                            e.isEvenSplit && e.shares.isNotEmpty ? '${formatPaise(e.shares.first.amountPaise)} each' : 'split ${e.shares.length} ways',
-                            style: AppText.small(),
-                          ),
-                        ],
-                      ),
-                    ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 48),
+                  child: EmptyState(
+                      icon: Icons.receipt_long_outlined, title: 'Nothing spent yet', body: 'Pay from the trip on the Overview tab and it shows up here.'),
+                )
+              else ...[
+                SurfaceCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Spent by the group', style: AppText.detail()),
+                      Text(formatPaise(t.spentPaise), style: AppText.balance()),
+                      Text('${newestFirst.length} ${newestFirst.length == 1 ? 'payment' : 'payments'}', style: AppText.detail()),
+                    ],
                   ),
                 ),
+                const SectionTitle('Payments'),
+                SurfaceCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < newestFirst.length; i++) ...[
+                        if (i > 0) const Divider(indent: 72),
+                        _row(t, newestFirst[i]),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _row(Trip t, Expense e) {
+    final to = e.mode == 'reimburse' ? 'Paid back to ${t.nameOf(e.payeeUserId)}' : 'To ${e.payee}';
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: TileIcon(categoryIcon(e.category)),
+      title: Text(e.description, style: AppText.body(weight: FontWeight.w600)),
+      subtitle: Text('$to · ${formatDay(e.at)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.detail()),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(formatPaise(e.amountPaise), style: AppText.body(weight: FontWeight.w700)),
+          if (e.isEvenSplit && e.shares.length > 1) Text('${formatPaise(e.shares.first.amountPaise)} each', style: AppText.small()),
+        ],
+      ),
     );
   }
 }

@@ -8,9 +8,10 @@ import '../../widgets/ai_card.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/tag.dart';
+import '../../widgets/tile_icon.dart';
 
-/// Budget tab: the whole trip, a bar per category, a suggestion to move
-/// money between categories, and alert switches.
+/// Budget tab: the whole trip, one row per category (tap to set its limit),
+/// and a suggestion to move budget between categories.
 class BudgetTab extends StatefulWidget {
   const BudgetTab({super.key, required this.trip, required this.onChanged});
 
@@ -23,12 +24,6 @@ class BudgetTab extends StatefulWidget {
 
 class _BudgetTabState extends State<BudgetTab> {
   late Future<Budgets> _budgets = api.budgets(widget.trip.id);
-
-  // Alert switches. Kept on this screen for the demo; the backend always
-  // sends the 80% and over-budget alerts.
-  bool _warn80 = true;
-  bool _warnOver = true;
-  bool _daily = false;
 
   void _reload() {
     setState(() => _budgets = api.budgets(widget.trip.id));
@@ -60,6 +55,35 @@ class _BudgetTabState extends State<BudgetTab> {
     }
   }
 
+  // Sets one category's limit. Only the limit changes; no money moves.
+  Future<void> _edit(BudgetLine l) async {
+    final field = TextEditingController(text: l.limitPaise == 0 ? '' : paiseToInput(l.limitPaise));
+    final paise = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${categoryLabel(l.category)} budget'),
+        content: TextField(
+          controller: field,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(prefixText: '₹ ', hintText: 'For the whole trip', helperText: 'Leave empty for no budget'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, parseToPaise(field.text) ?? 0), child: const Text('Save')),
+        ],
+      ),
+    );
+    field.dispose();
+    if (paise == null) return;
+    try {
+      await api.setBudgets(widget.trip.id, {l.category: paise});
+      _reload();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AsyncView<Budgets>(
@@ -67,88 +91,79 @@ class _BudgetTabState extends State<BudgetTab> {
       onRetry: _reload,
       builder: (context, b) {
         final move = suggestMove(b);
+        final open = widget.trip.isOpen;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (b.limitPaise > 0)
+              SurfaceCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Whole trip', style: AppText.detail()),
+                    Text('${formatPaise(b.usedPaise)} of ${formatPaise(b.limitPaise)}', style: AppText.heading()),
+                    const SizedBox(height: 10),
+                    Bar(fraction: b.usedPaise / b.limitPaise),
+                  ],
+                ),
+              )
+            else
+              Text('Set a limit for any category and Pointy warns you at 80% and when it goes over.', style: AppText.detail()),
+            SectionTitle(open ? 'Tap a category to set its budget' : 'By category'),
             SurfaceCard(
+              padding: EdgeInsets.zero,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Whole trip', style: AppText.detail()),
-                  Text('${formatPaise(b.usedPaise)} of ${formatPaise(b.limitPaise)}', style: AppText.heading()),
-                  const SizedBox(height: 10),
-                  Bar(fraction: b.limitPaise == 0 ? 0 : b.usedPaise / b.limitPaise),
-                  const SizedBox(height: 6),
-                  Text('${b.percent}% used · day ${b.day} of ${b.days}', style: AppText.small()),
+                  for (var i = 0; i < b.lines.length; i++) ...[
+                    if (i > 0) const Divider(indent: 16),
+                    _line(b.lines[i], open),
+                  ],
                 ],
               ),
             ),
-            const SectionTitle('By category'),
-            for (final l in b.lines) _line(l),
-            if (move != null && widget.trip.isOpen) ...[
-              const SizedBox(height: 8),
+            if (move != null && open) ...[
+              const SizedBox(height: 16),
               AiCard(
                 title: 'Move ${formatPaise(move.amountPaise)} from ${categoryLabel(move.from.category)} '
                     'to ${categoryLabel(move.to.category)}',
                 body: '${categoryLabel(move.to.category)} is ahead of pace; '
                     '${categoryLabel(move.from.category)} is likely to have money left.',
-                reasons: ['Day ${b.day} of ${b.days}', '${categoryLabel(move.to.category)} at ${move.to.percent}%'],
                 actionLabel: 'Review the move',
                 onTap: () => _applyMove(move),
               ),
             ],
-            const SectionTitle('Alerts'),
-            SurfaceCard(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    title: const Text('When a category reaches 80%'),
-                    value: _warn80,
-                    onChanged: (v) => setState(() => _warn80 = v),
-                  ),
-                  SwitchListTile(
-                    title: const Text('When a category goes over'),
-                    value: _warnOver,
-                    onChanged: (v) => setState(() => _warnOver = v),
-                  ),
-                  SwitchListTile(
-                    title: const Text('A summary each evening'),
-                    value: _daily,
-                    onChanged: (v) => setState(() => _daily = v),
-                  ),
-                ],
-              ),
-            ),
           ],
         );
       },
     );
   }
 
-  Widget _line(BudgetLine l) {
+  Widget _line(BudgetLine l, bool open) {
     final color = l.percent >= 100 ? AppColors.error : (l.percent >= 80 ? AppColors.amber500 : AppColors.pine500);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: SurfaceCard(
+    final set = l.limitPaise > 0;
+    return InkWell(
+      onTap: open ? () => _edit(l) : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
+                Icon(categoryIcon(l.category), size: 20, color: AppColors.pine700),
+                const SizedBox(width: 10),
                 Expanded(child: Text(categoryLabel(l.category), style: AppText.body(weight: FontWeight.w600))),
-                if (l.aheadOfPace) const Tag('Ahead of pace', kind: TagKind.pending),
+                if (l.aheadOfPace) ...[const Tag('Ahead of pace', kind: TagKind.pending), const SizedBox(width: 8)],
+                Text(
+                  set ? '${formatPaise(l.usedPaise)} of ${formatPaise(l.limitPaise)}' : (l.usedPaise > 0 ? '${formatPaise(l.usedPaise)} spent' : 'No budget'),
+                  style: AppText.detail(),
+                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Bar(fraction: l.limitPaise == 0 ? 0 : l.usedPaise / l.limitPaise, color: color),
-            const SizedBox(height: 6),
-            Text(
-              l.limitPaise == 0
-                  ? '${formatPaise(l.usedPaise)} spent · no budget set'
-                  : '${formatPaise(l.usedPaise)} of ${formatPaise(l.limitPaise)} · ${l.percent}%',
-              style: AppText.small(),
-            ),
+            if (set) ...[
+              const SizedBox(height: 8),
+              Bar(fraction: l.usedPaise / l.limitPaise, color: color),
+            ],
           ],
         ),
       ),

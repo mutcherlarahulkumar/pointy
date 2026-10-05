@@ -1,8 +1,8 @@
 # Pointy — handoff for Claude Code / Cowork
 
 > **Current state (read first).** Since this brief was written the project changed course; where it disagrees with the sections below, this note wins.
-> - **Money flow:** one US sandbox PayPal business account (USD, shown in rupees; PayPal does not pay between Indian accounts). **In:** Orders API checkout. **Out:** Payouts — withdraw to your PayPal, a trip paying a shop by PayPal (`mode: paypal`), settle-up refunds to each person's PayPal. **Inside:** friend payments, requests, splits and trip deposits from balance are ledger entries. `GET /api/money` checks the business account equals what is owed. No invoices, no UPI QR.
-> - **Trips UI:** tabs Overview (four numbered steps), Money in, Spent, Budget.
+> - **Money flow:** Pointy is a wallet. PayPal only at the edges (US sandbox business account, USD shown in rupees): **Add money** by Orders API checkout, **Withdraw** by Payouts to the person's PayPal (then their bank). Everything else is a ledger entry: paying a Pointy user, requests, splits, trip deposits from balance, trip payments to a Pointy user (`member`) or back to you (`reimburse`), settle-up into balances. No invoices, no UPI QR.
+> - **Trips UI:** tabs Overview (wallet, three actions, people), Money in, Spent, Budget. Screens stay short: one line of help per step, no repeated data.
 > - **Accounts:** phone + 6-digit PIN, bearer tokens. The `X-User-Id` header and demo users are gone; there is no seed data and the clock is real (IST).
 > - **Storage:** Postgres via `DATABASE_URL` (`internal/store`), in-memory working copy, every change saved in one transaction. One instance per database.
 > - **New features:** pay a friend by phone or Pointy QR, money requests, split a bill, top-ups, trip members by phone, deposits from balance or PayPal, `reimburse` / `member` trip expenses, settle into balances, unread alerts.

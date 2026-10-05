@@ -142,14 +142,16 @@ class _DepositsTabState extends State<DepositsTab> {
               onTap: () => _go(AssistantScreen(trip: t)),
             ),
           ],
-          const SectionTitle('Requests and reminders'),
+          // Requests show up once someone has sent them; nothing to show before.
           FutureBuilder<List<DepositRequest>>(
             future: _requests,
             builder: (context, snap) {
               if (snap.hasError) return Text('${snap.error}', style: AppText.detail(color: AppColors.error));
-              if (!snap.hasData) return const LinearProgressIndicator();
-              if (snap.data!.isEmpty) return Text('No requests sent yet.', style: AppText.detail());
-              return Column(children: [for (final r in snap.data!) _requestRow(r, organiser)]);
+              if (!snap.hasData || snap.data!.isEmpty) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [const SectionTitle('Requests and reminders'), for (final r in snap.data!) _requestRow(r, organiser)],
+              );
             },
           ),
         ],
