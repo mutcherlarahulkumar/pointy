@@ -196,6 +196,82 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		}
 		return map[string]any{"query": in.Query, "items": items}, nil
 	})
+	// ---- Pointy Parenting
+	authed("GET /api/family", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.Family(userID(r))
+	})
+	authed("POST /api/family/invites", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in app.InviteInput
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.InviteChild(userID(r), in)
+	})
+	authed("POST /api/family/invites/{id}/accept", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Code string `json:"code"`
+			PIN  string `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.AcceptInvite(userID(r), r.PathValue("id"), in.Code, in.PIN)
+	})
+	authed("POST /api/family/invites/{id}/decline", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]bool{"ok": true}, svc.DeclineInvite(userID(r), r.PathValue("id"))
+	})
+	authed("PUT /api/family/children/{id}/limits", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Daily   app.Paise `json:"daily_limit_paise"`
+			Monthly app.Paise `json:"monthly_limit_paise"`
+			PIN     string    `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.SetChildLimits(userID(r), r.PathValue("id"), in.Daily, in.Monthly, in.PIN)
+	})
+	authed("POST /api/family/children/{id}/unlink", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			PIN string `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"ok": true}, svc.Unlink(userID(r), r.PathValue("id"), in.PIN)
+	})
+	authed("GET /api/family/children/{id}/activity", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.ChildActivity(userID(r), r.PathValue("id"))
+	})
+	authed("POST /api/family/children/{id}/code-key", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			PIN string `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.ChildCodeKey(userID(r), r.PathValue("id"), in.PIN)
+	})
+	authed("POST /api/family/approvals", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in app.ApprovalInput
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.AskApproval(userID(r), in)
+	})
+	authed("POST /api/family/approvals/{id}/approve", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			PIN string `json:"pin"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.DecideApproval(userID(r), r.PathValue("id"), true, in.PIN)
+	})
+	authed("POST /api/family/approvals/{id}/decline", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.DecideApproval(userID(r), r.PathValue("id"), false, "")
+	})
+
 	// ---- the trip's shopping agent and group purchases (all or nothing)
 	authed("POST /api/trips/{id}/shop-agent", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {

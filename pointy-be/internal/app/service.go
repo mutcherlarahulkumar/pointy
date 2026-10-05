@@ -60,6 +60,8 @@ type Service struct {
 	chats         map[string][]*domain.ChatMessage // user id -> conversation with the AI
 	payouts       []*domain.Payout                 // money paid out to PayPal accounts
 	groupBuys     []*domain.GroupBuy               // purchases a trip's agent found, bought together
+	familyLinks   []*domain.FamilyLink             // parent and child accounts
+	approvals     []*domain.Approval               // child payments waiting for a parent
 	// holds is money set aside while a PayPal payout is being sent, so it
 	// cannot be spent twice in the meantime. Never stored: a payout either
 	// finishes (and is posted) or is released.
@@ -166,6 +168,10 @@ type Me struct {
 	OpenRequests    int          `json:"open_requests"` // money people are asking you for
 	PayPalMode      string       `json:"paypal_mode"`
 	Now             time.Time    `json:"now"`
+	// FamilyRole is "child" for a child account (the app shows the child
+	// version), "parent" for someone looking after one, else "".
+	FamilyRole    string `json:"family_role"`
+	FamilyInvites int    `json:"family_invites"` // parents asking to link this account
 }
 
 func (s *Service) Me(userID string) (Me, error) {
@@ -194,6 +200,18 @@ func (s *Service) Me(userID string) (Me, error) {
 			m.OpenRequests++
 		}
 	}
+	switch {
+	case s.isChildL(userID):
+		m.FamilyRole = "child"
+	case s.isParentL(userID):
+		m.FamilyRole = "parent"
+	}
+	for _, l := range s.familyLinks {
+		if l.ChildID == userID && l.Status == "invited" && s.now().Before(l.CodeExpires) {
+			m.FamilyInvites++
+		}
+	}
+	_ = s.commitL() // a child who just turned 18
 	return m, nil
 }
 
@@ -309,10 +327,16 @@ func (s *Service) CreateTrip(userID string, in CreateTripInput) (TripView, error
 	if in.Name == "" || in.Start.IsZero() || in.End.Before(in.Start) || in.DepositTarget < 0 || in.DepositTarget > MaxAmount {
 		return TripView{}, domain.Invalid("a trip needs a name, a start, an end on or after the start, and a sensible deposit")
 	}
+	if s.isChildL(userID) {
+		return TripView{}, childOnly("Trips")
+	}
 	members := []string{userID}
 	for _, m := range in.Members {
 		if _, ok := s.users[m]; !ok {
 			return TripView{}, domain.Invalid("unknown member %q", m)
+		}
+		if s.isChildL(m) {
+			return TripView{}, domain.Conflict("child_account", s.name(m)+" has a child account, which cannot join trip wallets", nil)
 		}
 		if m != userID && !contains(members, m) {
 			members = append(members, m)
@@ -358,6 +382,9 @@ func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, err
 		if _, ok := s.users[m]; !ok {
 			return TripView{}, domain.Invalid("unknown member %q", m)
 		}
+		if s.isChildL(m) {
+			return TripView{}, domain.Conflict("child_account", s.name(m)+" has a child account, which cannot join trip wallets", nil)
+		}
 		if !t.HasMember(m) {
 			t.Members = append(t.Members, m)
 			s.alertL(t.ID, m, "trip", s.name(userID)+" added you to "+t.Name, "Open the trip to see the plan")
@@ -385,6 +412,13 @@ func contains(list []string, v string) bool {
 func (s *Service) StartTopUp(ctx context.Context, userID string, amount Paise) (*domain.Deposit, error) {
 	if err := checkAmount(amount); err != nil {
 		return nil, err
+	}
+	s.mu.Lock()
+	child := s.isChildL(userID)
+	s.mu.Unlock()
+	if child {
+		// PayPal is for adults; a parent sends pocket money instead.
+		return nil, childOnly("Adding money with PayPal")
 	}
 	return s.startOrder(ctx, "", userID, amount, "Pointy balance top-up")
 }

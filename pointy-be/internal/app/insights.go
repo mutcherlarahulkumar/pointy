@@ -317,6 +317,10 @@ var personalPlaces = map[string]bool{"pharmacy": true, "clothing": true, "electr
 func (s *Service) Suggest(userID string, in SuggestInput) Suggestion {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.isChildL(userID) {
+		// No suggestions from time and place for children (DPDP Act s.9(3)).
+		return Suggestion{Title: "Pay someone", Category: domain.Other, Wallet: "personal", Reasons: []string{}}
+	}
 	at := s.now()
 	if in.At != nil {
 		at = *in.At

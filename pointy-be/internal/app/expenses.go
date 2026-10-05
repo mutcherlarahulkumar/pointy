@@ -32,6 +32,12 @@ type ExpenseInput struct {
 	Lng               float64             `json:"lng"`
 	At                *time.Time          `json:"at"`
 	ConfirmOverBudget bool                `json:"confirm_over_budget"`
+	// ParentCode is a child's one-time approval code from their parent's
+	// app, for a payment over the child's limit.
+	ParentCode string `json:"parent_code"`
+	// parentApproved is set by the server when the parent approved on
+	// their own phone.
+	parentApproved bool
 }
 
 func (in *ExpenseInput) normalise(now time.Time) error {
@@ -207,6 +213,16 @@ func (s *Service) PayPersonal(userID string, in ExpenseInput) (*domain.Expense, 
 // transferL moves money between two personal balances and records it. The
 // caller commits.
 func (s *Service) transferL(from, to string, in ExpenseInput, alertTitle string) (*domain.Expense, error) {
+	if err := s.childSendCheckL(from, in); err != nil {
+		return nil, err
+	}
+	if err := s.childReceiveCheckL(to, in.Amount); err != nil {
+		return nil, err
+	}
+	if s.isChildL(from) {
+		// No location is kept for a child's payments (DPDP Act s.9(3)).
+		in.PlaceName, in.PlaceType, in.Lat, in.Lng = "", "", 0, 0
+	}
 	acc := domain.PersonalAccount(from)
 	if bal := s.availL(acc); bal < in.Amount {
 		return nil, domain.Conflict("insufficient_balance", "your balance is "+INR(bal)+"; add money first", map[string]any{"balance_paise": bal})

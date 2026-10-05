@@ -72,6 +72,10 @@ func (s *Service) Withdraw(ctx context.Context, userID string, amount Paise) (*d
 		s.mu.Unlock()
 		return nil, domain.NotFound("user")
 	}
+	if s.isChildL(userID) {
+		s.mu.Unlock()
+		return nil, childOnly("Withdrawing")
+	}
 	if u.PayPalEmail == "" {
 		s.mu.Unlock()
 		return nil, domain.Conflict("no_paypal_email", "add your PayPal email in Profile first, so Pointy knows where to send the money", nil)

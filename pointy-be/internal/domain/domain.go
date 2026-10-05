@@ -332,3 +332,52 @@ type GroupBuyShare struct {
 	AuthID      string     `json:"paypal_authorization_id,omitempty"`
 	CommittedAt *time.Time `json:"committed_at,omitempty"`
 }
+
+// FamilyLink makes a Pointy account a child account looked after by a
+// parent. It is made only when both sides agree on their own phones: the
+// parent starts it with their PIN and accepts the terms, and the child
+// accepts with the pairing code shown on the parent's phone and the
+// child's own PIN.
+type FamilyLink struct {
+	ID        string `json:"id"`
+	ParentID  string `json:"parent_id"`
+	ChildID   string `json:"child_id"`
+	BirthDate string `json:"birth_date"` // the child's, YYYY-MM-DD, as the parent declared it
+	// Status: invited, active, ended (unlinked by the parent), graduated
+	// (the child turned 18), cancelled (the invite expired or was refused).
+	Status       string `json:"status"`
+	DailyLimit   Paise  `json:"daily_limit_paise"`
+	MonthlyLimit Paise  `json:"monthly_limit_paise"`
+	// Consent record (DPDP Act 2023, section 9): which terms the parent
+	// accepted and when both sides agreed.
+	TermsVersion    string     `json:"terms_version"`
+	ParentConsentAt time.Time  `json:"parent_consent_at"`
+	ChildAcceptedAt *time.Time `json:"child_accepted_at,omitempty"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	// The pairing code is kept only as a hash, for 10 minutes.
+	CodeHash     string    `json:"code_hash,omitempty"`
+	CodeExpires  time.Time `json:"code_expires"`
+	CodeAttempts int       `json:"code_attempts,omitempty"`
+	// TOTP key for approval codes, one per child, so a parent with several
+	// children never mixes their codes up. LastStep stops a code being
+	// used twice.
+	TOTPSecret string    `json:"totp_secret,omitempty"`
+	LastStep   int64     `json:"last_step,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Approval is a child's payment that is over their limit, waiting for the
+// parent to approve it on the parent's own phone.
+type Approval struct {
+	ID        string     `json:"id"`
+	LinkID    string     `json:"link_id"`
+	ChildID   string     `json:"child_id"`
+	PayeeID   string     `json:"payee_id"`
+	Amount    Paise      `json:"amount_paise"`
+	Note      string     `json:"note"`
+	Reason    string     `json:"reason"` // which limit it crosses
+	Status    string     `json:"status"` // pending, approved (paid), declined, expired, failed
+	ExpenseID string     `json:"expense_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
+}
