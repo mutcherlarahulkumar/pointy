@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
+import 'family_mode.dart';
 import 'models.dart';
 
 /// An error answer from the backend: {"error":{"code","message","details"}}.
@@ -104,7 +105,11 @@ class ApiClient {
   Future<void> verifyPin(String pin) async => _send('POST', '/api/auth/verify-pin', body: {'pin': pin});
 
   // You and people
-  Future<Me> me() async => Me.fromJson(await _obj('GET', '/api/me'));
+  Future<Me> me() async {
+    final m = Me.fromJson(await _obj('GET', '/api/me'));
+    FamilyMode.isChild.value = m.isChild; // the app switches between the adult and child versions
+    return m;
+  }
   Future<List<Person>> contacts() async => (await _arr('GET', '/api/contacts')).map(Person.fromJson).toList();
   Future<Person> lookupPhone(String phone) async =>
       Person.fromJson(await _obj('GET', '/api/users/lookup?phone=${Uri.encodeQueryComponent(phone)}'));
@@ -166,6 +171,24 @@ class ApiClient {
       Trip.fromJson(await _obj('POST', '/api/trips/$tripId/members', body: {'members': ids}));
   Future<Trip> depositFromBalance(String tripId, int amountPaise, {required String key}) async => Trip.fromJson(
       await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise}, key: key));
+  // Pointy Parenting
+  Future<FamilyView> family() async => FamilyView.fromJson(await _obj('GET', '/api/family'));
+  Future<FamilyInvite> inviteChild(Map<String, dynamic> body) async => FamilyInvite.fromJson(await _obj('POST', '/api/family/invites', body: body));
+  Future<ChildView> acceptFamilyInvite(String linkId, String code, String pin) async =>
+      ChildView.fromJson(await _obj('POST', '/api/family/invites/$linkId/accept', body: {'code': code, 'pin': pin}));
+  Future<void> declineFamilyInvite(String linkId) async => _send('POST', '/api/family/invites/$linkId/decline');
+  Future<ChildView> setChildLimits(String childId, int dailyPaise, int monthlyPaise, String pin) async => ChildView.fromJson(await _obj(
+      'PUT', '/api/family/children/$childId/limits', body: {'daily_limit_paise': dailyPaise, 'monthly_limit_paise': monthlyPaise, 'pin': pin}));
+  Future<void> unlinkChild(String childId, String pin) async => _send('POST', '/api/family/children/$childId/unlink', body: {'pin': pin});
+  Future<List<HistoryItem>> childActivity(String childId) async =>
+      (await _arr('GET', '/api/family/children/$childId/activity')).map(HistoryItem.fromJson).toList();
+  Future<String> childCodeKey(String childId, String pin) async =>
+      ((await _obj('POST', '/api/family/children/$childId/code-key', body: {'pin': pin}))['secret'] as String?) ?? '';
+  Future<Approval> askApproval(String payeeId, int amountPaise, String note) async =>
+      Approval.fromJson(await _obj('POST', '/api/family/approvals', body: {'payee_id': payeeId, 'amount_paise': amountPaise, 'note': note}));
+  Future<Approval> decideApproval(String id, {required bool approve, String pin = ''}) async =>
+      Approval.fromJson(await _obj('POST', '/api/family/approvals/$id/${approve ? 'approve' : 'decline'}', body: {'pin': pin}));
+
   // The trip's shopping agent and group purchases
   Future<AgentAnswer> shopAgent(String tripId, String text) async =>
       AgentAnswer.fromJson(await _obj('POST', '/api/trips/$tripId/shop-agent', body: {'text': text}));

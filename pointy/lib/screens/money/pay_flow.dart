@@ -115,8 +115,9 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   String _key = newIdempotencyKey();
   bool _busy = false;
 
-  Future<void> _pay() async {
-    if (!await confirmPayment(context, 'Pay ${formatPaise(widget.amountPaise)} to ${widget.person.name}')) return;
+  Future<void> _pay({String parentCode = ''}) async {
+    // A parent's code is the OK for this payment; the PIN was asked already.
+    if (parentCode.isEmpty && !await confirmPayment(context, 'Pay ${formatPaise(widget.amountPaise)} to ${widget.person.name}')) return;
     setState(() => _busy = true);
     try {
       final e = await api.payPerson({
@@ -124,6 +125,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
         'amount_paise': widget.amountPaise,
         'description': widget.note.isEmpty ? 'Payment' : widget.note,
         'category': 'other',
+        if (parentCode.isNotEmpty) 'parent_code': parentCode,
       }, key: _key);
       if (!mounted) return;
       // Close the flow and show the result on top of where it started.
@@ -140,9 +142,82 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       _key = newIdempotencyKey(); // the server stored this answer under the old key
       if (!mounted) return;
       setState(() => _busy = false);
+      if (e.code == 'needs_parent') return _askParent(e);
       showError(context, e);
       if (e.code == 'insufficient_balance') setState(() => _me = api.me());
     }
+  }
+
+  // A child's payment over their limit: ask the parent to approve it on
+  // their phone, or type the code from the parent's app if they are here.
+  Future<void> _askParent(ApiException e) async {
+    final parent = (e.details?['parent'] as String?) ?? 'your parent';
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('This needs $parent\'s OK', style: AppText.title()),
+              const SizedBox(height: 6),
+              Text(e.toString(), style: AppText.body(color: AppColors.slate)),
+              const SizedBox(height: 20),
+              FilledButton.icon(onPressed: () => Navigator.pop(c, 'ask'), icon: const Icon(Icons.send_to_mobile_rounded), label: Text('Ask $parent on their phone')),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(onPressed: () => Navigator.pop(c, 'code'), icon: const Icon(Icons.pin_outlined), label: Text('$parent is here: type their code')),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'code') {
+      final code = await _codeDialog(parent);
+      if (code != null && mounted) await _pay(parentCode: code);
+      return;
+    }
+    try {
+      await api.askApproval(widget.person.id, widget.amountPaise, widget.note);
+      if (!mounted) return;
+      final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
+      nav.push(MaterialPageRoute(
+        builder: (_) => SuccessScreen(
+          pending: true,
+          title: 'Sent to $parent',
+          amount: formatPaise(widget.amountPaise),
+          subtitle: 'to ${widget.person.name}. It is paid as soon as $parent approves.',
+        ),
+      ));
+    } catch (err) {
+      if (mounted) showError(context, err);
+    }
+  }
+
+  Future<String?> _codeDialog(String parent) {
+    final field = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('$parent\'s code'),
+        content: TextField(
+          controller: field,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          textAlign: TextAlign.center,
+          style: AppText.title().copyWith(letterSpacing: 8),
+          decoration: InputDecoration(hintText: '••••••', helperText: 'In $parent\'s Pointy: Family → you → Approval code'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, field.text.trim()), child: const Text('Pay')),
+        ],
+      ),
+    );
   }
 
   @override
@@ -159,9 +234,11 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
           step: 2,
           title: 'Check and pay',
           hint: 'Check the details. You confirm with your fingerprint or PIN.',
-          buttonLabel: short ? 'Add money first' : 'Pay ${formatPaise(widget.amountPaise)}',
+          buttonLabel: short ? (me.isChild ? 'Not enough pocket money' : 'Add money first') : 'Pay ${formatPaise(widget.amountPaise)}',
           busy: _busy,
-          onNext: short
+          onNext: short && me.isChild
+              ? null
+              : short
               ? () async {
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TopUpScreen(suggestPaise: -after)));
                   setState(() => _me = api.me());

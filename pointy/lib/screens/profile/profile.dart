@@ -5,6 +5,7 @@ import '../../models.dart';
 import '../../payment_lock.dart';
 import '../../session.dart';
 import '../../look.dart';
+import '../family/family.dart';
 import '../../theme.dart';
 import '../../tour.dart';
 import '../../widgets/async_view.dart';
@@ -116,8 +117,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Center(child: Text('+91 ${formatPhone(me.user.phone)}', style: AppText.body(color: AppColors.slate))),
             const SectionTitle('Money'),
             tile(Icons.qr_code_2_rounded, 'My QR', 'Friends scan it to pay you', () => go(const MyQrScreen())),
+            tile(Icons.family_restroom_rounded, 'Family',
+                me.isChild ? 'Your parent and your limits' : (me.familyInvites > 0 ? 'A parent is asking to link your account' : 'Pointy Parenting: look after a child\'s Pointy'),
+                () async {
+              await Navigator.of(context).push(familyRoute());
+              setState(() => _me = api.me());
+            }),
             tile(Icons.swap_vert_rounded, 'Requests', 'Money asked of you, and by you', () => go(const RequestsScreen())),
-            tile(Icons.account_balance_rounded, 'Withdrawal account', me.paypalEmail.isEmpty ? 'Add the PayPal account your withdrawals go to' : 'PayPal · ${me.paypalEmail}',
+            if (!me.isChild) tile(Icons.account_balance_rounded, 'Withdrawal account', me.paypalEmail.isEmpty ? 'Add the PayPal account your withdrawals go to' : 'PayPal · ${me.paypalEmail}',
                 () async {
               await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PayPalAccountScreen(current: me.paypalEmail)));
               setState(() => _me = api.me());
@@ -133,8 +140,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
             tile(Icons.palette_outlined, 'App colour', AppColors.palette.name, _pickColour),
-            tile(Icons.tune_rounded, 'What the AI may use', 'Choose what suggestions can look at', () => go(const AiSettingsScreen())),
-            tile(Icons.explore_outlined, 'Take the tour', 'What each part of the app does, step by step', () => startTour(context)),
+            if (!me.isChild) tile(Icons.tune_rounded, 'What the AI may use', 'Choose what suggestions can look at', () => go(const AiSettingsScreen())),
+            if (!me.isChild) tile(Icons.explore_outlined, 'Take the tour', 'What each part of the app does, step by step', () => startTour(context)),
             tile(Icons.info_outline_rounded, 'How Pointy works in India', 'Where PayPal fits in', () => go(const HowItWorksScreen())),
             const SizedBox(height: 8),
             Text('Server: ${api.baseUrl} · PayPal: ${me.paypalMode}', textAlign: TextAlign.center, style: AppText.small()),
