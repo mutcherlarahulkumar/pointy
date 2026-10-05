@@ -72,6 +72,8 @@ func (s *Service) SetBudgets(tripID, userID string, in map[domain.Category]Paise
 		for c, v := range in {
 			t.Budgets[c] = v
 		}
+		s.track(t)
+		err = s.commitL()
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -120,7 +122,7 @@ type Insights struct {
 // TimeOfDay buckets a clock time. It uses the time zone the payment was made
 // in, which is carried in the timestamp the app sends.
 func TimeOfDay(t time.Time) string {
-	switch h := t.Hour(); {
+	switch h := t.In(IST).Hour(); {
 	case h >= 5 && h < 12:
 		return "morning"
 	case h >= 12 && h < 18:
@@ -253,6 +255,7 @@ func (s *Service) Suggest(userID string, in SuggestInput) Suggestion {
 	if in.At != nil {
 		at = *in.At
 	}
+	at = at.In(IST)
 	pt := strings.ToLower(strings.TrimSpace(in.PlaceType))
 	out := Suggestion{Category: domain.Other, Wallet: "personal", Reasons: []string{}}
 	if c, ok := placeCategory[pt]; ok {
@@ -277,7 +280,7 @@ func (s *Service) Suggest(userID string, in SuggestInput) Suggestion {
 	if pt != "" {
 		out.Reasons = append(out.Reasons, titleCase(pt)+" nearby")
 	}
-	t := s.activeTripL(userID, at)
+	t := s.currentTripL(userID, at)
 	switch {
 	case t != nil && !personalPlaces[pt]:
 		out.Wallet, out.TripID, out.SplitMethod, out.Participants = "trip", t.ID, domain.SplitEqual, t.Members

@@ -52,14 +52,23 @@ func Sandbox() (*paypal.Sandbox, error) {
 	if err != nil || rate <= 0 {
 		return nil, errors.New("POINTY_INR_PER_UNIT must be a positive number")
 	}
+	// After approving on PayPal the person lands on this server's return
+	// page, which finishes the payment straight away.
+	public := strings.TrimRight(PublicURL(), "/")
 	sb := &paypal.Sandbox{
 		BaseURL: Env("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com"), ClientID: os.Getenv("PAYPAL_CLIENT_ID"), Secret: os.Getenv("PAYPAL_SECRET"),
 		WebhookID: os.Getenv("PAYPAL_WEBHOOK_ID"), Currency: Env("PAYPAL_CURRENCY", "USD"), INRPerUnit: rate,
-		ReturnURL: Env("PAYPAL_RETURN_URL", "https://example.com/pointy/return"), CancelURL: Env("PAYPAL_CANCEL_URL", "https://example.com/pointy/cancel"),
-		InvoicerMail: os.Getenv("PAYPAL_INVOICER_EMAIL"), HTTP: &http.Client{Timeout: 20 * time.Second},
+		ReturnURL: Env("PAYPAL_RETURN_URL", public+"/paypal/return"), CancelURL: Env("PAYPAL_CANCEL_URL", public+"/paypal/cancel"),
+		HTTP: &http.Client{Timeout: 20 * time.Second},
 	}
 	if sb.ClientID == "" || sb.Secret == "" {
 		return nil, errors.New("PAYPAL_CLIENT_ID and PAYPAL_SECRET must both be set (put them in pointy-be/.env)")
 	}
 	return sb, nil
+}
+
+// PublicURL is where phones and PayPal reach this server. Render sets
+// RENDER_EXTERNAL_URL automatically.
+func PublicURL() string {
+	return Env("PUBLIC_URL", Env("RENDER_EXTERNAL_URL", "http://localhost:"+Env("PORT", "8080")))
 }

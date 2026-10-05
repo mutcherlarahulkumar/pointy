@@ -10,14 +10,20 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
 )
 
-const trip = "t_goa"
+// clock is a settable time for tests: Tue 13 Oct 2026, 8:42 pm IST.
+type clock struct{ t time.Time }
 
-func demo(t *testing.T) (*Service, *paypal.Mock) {
+func (c *clock) now() time.Time { return c.t }
+
+func newTestService(t *testing.T, st Store) (*Service, *paypal.Mock, *clock) {
 	t.Helper()
 	pp := &paypal.Mock{}
-	s := New(pp, func() time.Time { return DemoNow })
-	SeedDemo(s)
-	return s, pp
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return s, pp, c
 }
 
 func code(err error) string {
@@ -28,231 +34,379 @@ func code(err error) string {
 	return ""
 }
 
-// The books must always agree: money held at PayPal for the trip equals the
-// sum of what is owed to the members.
+func must[T any](t *testing.T) func(T, error) T {
+	return func(v T, err error) T {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+}
+
+func register(t *testing.T, s *Service, name, phone string) string {
+	t.Helper()
+	r, err := s.Register(RegisterInput{Name: name, Phone: phone, PIN: "246810"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.User.ID
+}
+
+// topUp adds money to a balance through the PayPal checkout path.
+func topUp(t *testing.T, s *Service, user string, rupees int64) {
+	t.Helper()
+	d, err := s.StartTopUp(context.Background(), user, domain.Rupees(rupees))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CaptureDeposit(context.Background(), d.OrderID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func balance(s *Service, user string) Paise {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ledger.Owed(domain.PersonalAccount(user))
+}
+
+// checkBooks: money held for personal balances equals the sum of all
+// balances, and each trip's pool equals what its members are owed.
 func checkBooks(t *testing.T, s *Service) {
 	t.Helper()
-	v, err := s.Trip(trip, "u_you")
-	if err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var owed Paise
+	for id := range s.users {
+		owed += s.ledger.Owed(domain.PersonalAccount(id))
+	}
+	if held := s.ledger.Held(domain.PersonalClearing); held != owed {
+		t.Fatalf("personal pool holds %d but balances add up to %d", held, owed)
+	}
+	for _, tr := range s.trips {
+		var shares Paise
+		for _, m := range tr.Members {
+			shares += s.ledger.Owed(domain.ShareAccount(tr.ID, m))
+		}
+		if held := s.ledger.Held(domain.ClearingAccount(tr.ID)); held != shares {
+			t.Fatalf("trip %s holds %d but shares add up to %d", tr.Name, held, shares)
+		}
+	}
+}
+
+func TestPhoneAndPINRules(t *testing.T) {
+	for in, want := range map[string]string{"+91 98765 43210": "9876543210", "098765-43210": "9876543210", "9876543210": "9876543210"} {
+		if got, err := NormalizePhone(in); err != nil || got != want {
+			t.Fatalf("%q -> %q, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"12345", "5876543210", "98765432101"} {
+		if _, err := NormalizePhone(bad); err == nil {
+			t.Fatalf("%q should be rejected", bad)
+		}
+	}
+	s, _, _ := newTestService(t, nil)
+	for _, pin := range []string{"12345", "abcdef", "111111", "123456", "654321"} {
+		if _, err := s.Register(RegisterInput{Name: "Asha", Phone: "9876543210", PIN: pin}); code(err) != "invalid" {
+			t.Fatalf("PIN %q: %v", pin, err)
+		}
+	}
+}
+
+func TestRegisterLoginAndLockout(t *testing.T) {
+	s, _, c := newTestService(t, nil)
+	reg := must[AuthResult](t)(s.Register(RegisterInput{Name: "  Asha   Rao ", Phone: "+91 98765 43210", PIN: "246810"}))
+	if reg.User.Name != "Asha Rao" || reg.User.Phone != "9876543210" {
+		t.Fatalf("got %+v", reg.User)
+	}
+	if id, ok := s.UserForToken(reg.Token); !ok || id != reg.User.ID {
+		t.Fatal("token does not resolve")
+	}
+	if _, err := s.Register(RegisterInput{Name: "Other", Phone: "9876543210", PIN: "246810"}); code(err) != "phone_taken" {
+		t.Fatalf("duplicate phone: %v", err)
+	}
+	pc := must[PhoneCheck](t)(s.CheckPhone("9876543210"))
+	if !pc.Exists || pc.FirstName != "Asha" {
+		t.Fatalf("check phone %+v", pc)
+	}
+	for i := 0; i < maxFailedPINs; i++ {
+		if _, err := s.Login("9876543210", "000001"); code(err) != "wrong_pin" {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	if _, err := s.Login("9876543210", "246810"); code(err) != "too_many_attempts" {
+		t.Fatalf("should be locked: %v", err)
+	}
+	c.t = c.t.Add(loginWindow + time.Minute)
+	log := must[AuthResult](t)(s.Login("9876543210", "246810"))
+	if err := s.Logout(log.Token); err != nil {
 		t.Fatal(err)
 	}
-	var owed Paise
-	for _, m := range v.MemberDetails {
-		owed += m.Left
-	}
-	if owed != v.Balance {
-		t.Fatalf("books do not balance: held %d, owed to members %d", v.Balance, owed)
+	if _, ok := s.UserForToken(log.Token); ok {
+		t.Fatal("token still works after sign out")
 	}
 }
 
-func dinner(confirm bool) ExpenseInput {
-	return ExpenseInput{Description: "Dinner", Category: domain.Food, Amount: domain.Rupees(1840), Payee: "Beach shack, Baga",
-		PayeeEmail: "shack@example.com", PlaceName: "Baga", PlaceType: "restaurant", ConfirmOverBudget: confirm}
-}
-
-func TestSeedMatchesTheDesigns(t *testing.T) {
-	s, _ := demo(t)
-	v, _ := s.Trip(trip, "u_you")
-	if v.Balance != domain.Rupees(12192) || v.Deposited != domain.Rupees(21000) || v.Spent != domain.Rupees(8808) {
-		t.Fatalf("balance %d deposited %d spent %d", v.Balance, v.Deposited, v.Spent)
+func TestTopUpCapturesOnce(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(context.Background(), a, domain.Rupees(500)))
+	for i := 0; i < 3; i++ {
+		if _, err := s.CaptureDeposit(context.Background(), d.OrderID); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if v.Day != 2 || v.Days != 5 {
-		t.Fatalf("day %d of %d", v.Day, v.Days)
-	}
-	if you := v.MemberDetails[0]; you.Left != domain.Rupees(798) || you.Used != domain.Rupees(2202) {
-		t.Fatalf("your share: %+v", you)
-	}
-	me, _ := s.Me("u_you")
-	if me.PersonalBalance != domain.Rupees(8430) || me.ActiveTripID != trip {
-		t.Fatalf("me: %+v", me)
+	if b := balance(s, a); b != domain.Rupees(500) {
+		t.Fatalf("balance %d", b)
 	}
 	checkBooks(t, s)
 }
 
-func TestBudgetWarningThenPay(t *testing.T) {
-	s, pp := demo(t)
-	ctx := context.Background()
-	_, err := s.AddExpense(ctx, trip, "u_you", dinner(false))
-	var de *domain.Error
-	if !errors.As(err, &de) || de.Code != "budget_warning" {
+func TestCaptureNotApprovedLeavesNothing(t *testing.T) {
+	s, pp, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(context.Background(), a, domain.Rupees(500)))
+	pp.FailCapture = true
+	if _, err := s.CaptureDeposit(context.Background(), d.OrderID); code(err) != "not_approved" {
+		t.Fatalf("got %v", err)
+	}
+	if balance(s, a) != 0 {
+		t.Fatal("money credited without capture")
+	}
+	pp.FailCapture = false
+	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), d.OrderID))
+	if balance(s, a) != domain.Rupees(500) {
+		t.Fatal("retry after approval should credit")
+	}
+}
+
+func TestPayFriendAndRequests(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 1000)
+
+	if _, err := s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(5000), PayeeUserID: d}); code(err) != "insufficient_balance" {
+		t.Fatalf("overspend: %v", err)
+	}
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(120), PayeeUserID: d}))
+	if balance(s, a) != domain.Rupees(880) || balance(s, d) != domain.Rupees(120) {
+		t.Fatalf("balances %d %d", balance(s, a), balance(s, d))
+	}
+
+	// Dev asks Asha for ₹300; Asha pays it.
+	r := must[MoneyRequestView](t)(s.RequestMoney(d, MoneyRequestInput{PayerID: a, Amount: domain.Rupees(300), Note: "Movie"}))
+	if me := must[Me](t)(s.Me(a)); me.OpenRequests != 1 {
+		t.Fatalf("open requests %d", me.OpenRequests)
+	}
+	if _, err := s.PayMoneyRequest(d, r.ID); code(err) != "not_found" {
+		t.Fatal("the requester cannot pay their own request")
+	}
+	must[MoneyRequestView](t)(s.PayMoneyRequest(a, r.ID))
+	if _, err := s.PayMoneyRequest(a, r.ID); code(err) != "already_closed" {
+		t.Fatal("paid twice")
+	}
+	if balance(s, a) != domain.Rupees(580) || balance(s, d) != domain.Rupees(420) {
+		t.Fatalf("balances %d %d", balance(s, a), balance(s, d))
+	}
+
+	// A declined request moves nothing.
+	r2 := must[MoneyRequestView](t)(s.RequestMoney(a, MoneyRequestInput{PayerID: d, Amount: domain.Rupees(50)}))
+	if v := must[MoneyRequestView](t)(s.DeclineMoneyRequest(d, r2.ID)); v.Status != "declined" {
+		t.Fatal(v.Status)
+	}
+	if len(s.Contacts(a)) != 1 || len(s.History(d)) == 0 {
+		t.Fatal("contacts or history missing")
+	}
+	checkBooks(t, s)
+}
+
+func TestSplitBillSendsShares(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	m := register(t, s, "Meera", "9988776655")
+	res := must[SplitBillResult](t)(s.SplitBill(a, SplitBillInput{Description: "Dinner", Amount: 100000,
+		Participants: []domain.SplitInput{{UserID: a}, {UserID: d}, {UserID: m}}}))
+	if len(res.Requests) != 2 || res.Requests[0].Amount+res.Requests[1].Amount != 100000-res.Shares[0].Amount {
+		t.Fatalf("requests %+v shares %+v", res.Requests, res.Shares)
+	}
+}
+
+func goa(t *testing.T, s *Service, org string, members ...string) string {
+	t.Helper()
+	tv := must[TripView](t)(s.CreateTrip(org, CreateTripInput{Name: "Goa trip", Place: "Goa",
+		Start: time.Date(2026, 10, 12, 0, 0, 0, 0, IST), End: time.Date(2026, 10, 16, 0, 0, 0, 0, IST),
+		Members: members, DepositTarget: domain.Rupees(3000), Budgets: map[domain.Category]Paise{domain.Food: domain.Rupees(2000)}}))
+	return tv.ID
+}
+
+func TestTripFromDepositsToSettleUp(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	if me := must[Me](t)(s.Me(d)); me.ActiveTripID != trip {
+		t.Fatal("trip should be active for Dev")
+	}
+
+	// Asha pays her deposit from her balance; Dev with PayPal.
+	topUp(t, s, a, 5000)
+	must[TripView](t)(s.DepositFromBalance(trip, a, domain.Rupees(3000)))
+	dep := must[*domain.Deposit](t)(s.StartDeposit(context.Background(), trip, d, domain.Rupees(3000)))
+	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), dep.OrderID))
+	v := must[TripView](t)(s.Trip(trip, a))
+	if v.Balance != domain.Rupees(6000) || balance(s, a) != domain.Rupees(2000) {
+		t.Fatalf("wallet %d balance %d", v.Balance, balance(s, a))
+	}
+	checkBooks(t, s)
+
+	// Dev paid the shack ₹1,840 by UPI: the wallet pays him back, split 2 ways.
+	dinner := ExpenseInput{Description: "Dinner", Category: domain.Food, Amount: domain.Rupees(1840), Payee: "Beach shack", Mode: ModeReimburse}
+	if _, err := s.AddExpense(trip, d, dinner); code(err) != "budget_warning" {
 		t.Fatalf("expected a budget warning, got %v", err)
 	}
-	if c := de.Details.(domain.BudgetCheck); c.PercentBefore != 48 || c.PercentAfter != 85 || c.Left != domain.Rupees(752) || !c.Crosses80 {
-		t.Fatalf("check: %+v", c)
+	dinner.ConfirmOverBudget = true
+	e := must[*domain.Expense](t)(s.AddExpense(trip, d, dinner))
+	if e.PayeeUserID != d || balance(s, d) != domain.Rupees(1840) {
+		t.Fatalf("Dev should be paid back: %d", balance(s, d))
 	}
-	if len(pp.Payouts) != 0 {
-		t.Fatal("money moved before the warning was confirmed")
+	v = must[TripView](t)(s.Trip(trip, a))
+	if v.Spent != domain.Rupees(1840) || v.MemberDetails[0].Left != domain.Rupees(2080) {
+		t.Fatalf("spent %d, Asha left %d", v.Spent, v.MemberDetails[0].Left)
 	}
-	e, err := s.AddExpense(ctx, trip, "u_you", dinner(true))
-	if err != nil {
-		t.Fatal(err)
+	checkBooks(t, s)
+
+	// Too big for one share.
+	big := ExpenseInput{Description: "Villa", Category: domain.Stay, Amount: domain.Rupees(5000), Mode: ModeMember, PayeeUserID: a}
+	if _, err := s.AddExpense(trip, a, big); code(err) != "insufficient_share" {
+		t.Fatalf("got %v", err)
 	}
-	if len(e.Shares) != 4 || e.Shares[0].Amount != domain.Rupees(460) {
-		t.Fatalf("shares: %+v", e.Shares)
+
+	// Only the organiser settles; everything left goes back to balances.
+	if _, err := s.Settle(trip, d); code(err) != "forbidden" {
+		t.Fatal("Dev is not the organiser")
 	}
-	v, _ := s.Trip(trip, "u_you")
-	if v.Balance != domain.Rupees(10352) || v.MemberDetails[0].Left != domain.Rupees(338) {
-		t.Fatalf("after dinner: balance %d, your share %d", v.Balance, v.MemberDetails[0].Left)
+	st := must[Settlement](t)(s.Settle(trip, a))
+	if st.Refund != domain.Rupees(4160) || balance(s, a) != domain.Rupees(4080) || balance(s, d) != domain.Rupees(3920) {
+		t.Fatalf("refund %d, balances %d %d", st.Refund, balance(s, a), balance(s, d))
 	}
-	if len(pp.Payouts) != 1 || pp.Payouts[0][0].ReceiverEmail != "shack@example.com" {
-		t.Fatalf("payouts: %+v", pp.Payouts)
-	}
-	kinds := map[string]bool{}
-	for _, a := range s.Alerts("u_you") {
-		kinds[a.Title] = true
-	}
-	if !kinds["Food budget at 85%"] || !kinds["Your trip share is low"] {
-		t.Fatalf("alerts: %v", kinds)
+	if _, err := s.AddExpense(trip, a, dinner); code(err) != "trip_closed" {
+		t.Fatal("a settled trip cannot pay")
 	}
 	checkBooks(t, s)
 }
 
-func TestCannotOverspendAShare(t *testing.T) {
-	s, pp := demo(t)
-	in := ExpenseInput{Description: "Boat hire", Category: domain.Other, Amount: domain.Rupees(4000), PayeeEmail: "boat@example.com"}
-	if _, err := s.AddExpense(context.Background(), trip, "u_you", in); code(err) != "insufficient_share" {
-		t.Fatalf("expected insufficient_share, got %v", err) // your part would be ₹1,000 against ₹798
+func TestAssistantRequestsArePaidInApp(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	if _, err := s.DraftPlan(trip, d, "Collect ₹3,000"); code(err) != "forbidden" {
+		t.Fatal("only the organiser drafts")
 	}
-	if len(pp.Payouts) != 0 {
-		t.Fatal("a payout was sent for a payment that should have been refused")
+	p := must[*domain.Plan](t)(s.DraftPlan(trip, a, "Collect ₹3,000 from everyone by 20 Oct"))
+	if p.PerPerson != domain.Rupees(3000) || p.Due.Day() != 20 || len(s.requests) != 0 {
+		t.Fatalf("plan %+v; nothing may be sent before confirm", p)
+	}
+	made := must[[]*domain.DepositRequest](t)(s.ConfirmPlan(trip, p.ID, a))
+	if len(made) != 1 || made[0].UserID != d {
+		t.Fatalf("made %+v", made)
+	}
+	if _, err := s.PayRequest(made[0].ID, d); code(err) != "insufficient_balance" {
+		t.Fatalf("got %v", err)
+	}
+	must[RequestView](t)(s.Remind(made[0].ID, a))
+	must[RequestView](t)(s.Remind(made[0].ID, a))
+	if _, err := s.Remind(made[0].ID, a); code(err) != "reminder_cap" {
+		t.Fatal("third reminder in a day")
+	}
+	topUp(t, s, d, 3000)
+	r := must[RequestView](t)(s.PayRequest(made[0].ID, d))
+	if r.Status != "paid" || r.PaidVia != "balance" {
+		t.Fatalf("request %+v", r.DepositRequest)
 	}
 	checkBooks(t, s)
 }
 
-func TestFailedPayoutLeavesNoTrace(t *testing.T) {
-	s, pp := demo(t)
-	pp.FailPayouts = true
-	if _, err := s.AddExpense(context.Background(), trip, "u_you", dinner(true)); code(err) != "paypal_error" {
-		t.Fatalf("expected paypal_error, got %v", err)
+func TestPayPalDepositClosesRequest(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	p := must[*domain.Plan](t)(s.DraftPlan(trip, a, "Collect ₹3,000"))
+	made := must[[]*domain.DepositRequest](t)(s.ConfirmPlan(trip, p.ID, a))
+	dep := must[*domain.Deposit](t)(s.StartDeposit(context.Background(), trip, d, domain.Rupees(3000)))
+	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), dep.OrderID))
+	if made[0].Status != "paid" || made[0].PaidVia != "paypal" {
+		t.Fatalf("request %+v", made[0])
 	}
-	pp.FailPayouts = false
-	v, _ := s.Trip(trip, "u_you")
-	if v.Balance != domain.Rupees(12192) {
-		t.Fatalf("balance changed after a failed payout: %d", v.Balance)
-	}
-	if _, err := s.AddExpense(context.Background(), trip, "u_you", dinner(true)); err != nil {
-		t.Fatalf("the hold was not released: %v", err)
-	}
-	checkBooks(t, s)
 }
 
-func TestDepositIsCreditedOnce(t *testing.T) {
-	s, _ := demo(t)
-	ctx := context.Background()
-	d, err := s.StartDeposit(ctx, trip, "u_you", domain.Rupees(3000))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := s.Trip(trip, "u_you"); v.Balance != domain.Rupees(12192) {
-		t.Fatal("the wallet changed before the capture")
-	}
-	for i := 0; i < 2; i++ {
-		if _, err := s.CaptureDeposit(ctx, d.OrderID); err != nil {
-			t.Fatal(err)
+// memStore records saves and reloads them, standing in for Postgres to prove
+// the service rebuilds the same state after a restart.
+type memStore struct{ saved []any }
+
+func (m *memStore) Save(_ context.Context, items []any) error { m.saved = append(m.saved, items...); return nil }
+func (m *memStore) Load(context.Context) (*Snapshot, error) {
+	s := &Snapshot{}
+	seen := map[any]bool{}
+	for i := len(m.saved) - 1; i >= 0; i-- { // keep the latest copy of each object
+		it := m.saved[i]
+		key := it
+		switch v := it.(type) {
+		case domain.Entry:
+			key = "entry:" + v.ID
+		case domain.Session:
+			key = "session:" + v.TokenHash
+		case domain.SessionEnd:
+			key = "end:" + v.TokenHash
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		switch v := it.(type) {
+		case *domain.User:
+			s.Users = append([]*domain.User{v}, s.Users...)
+		case domain.Session:
+			s.Sessions = append(s.Sessions, v)
+		case *domain.Trip:
+			s.Trips = append([]*domain.Trip{v}, s.Trips...)
+		case domain.Entry:
+			s.Entries = append([]domain.Entry{v}, s.Entries...)
+		case *domain.Deposit:
+			s.Deposits = append(s.Deposits, v)
+		case *domain.Expense:
+			s.Expenses = append([]*domain.Expense{v}, s.Expenses...)
+		case *domain.DepositRequest:
+			s.Requests = append(s.Requests, v)
+		case *domain.Plan:
+			s.Plans = append(s.Plans, v)
+		case *domain.Alert:
+			s.Alerts = append([]*domain.Alert{v}, s.Alerts...)
+		case *domain.MoneyRequest:
+			s.MoneyRequests = append(s.MoneyRequests, v)
 		}
 	}
-	v, _ := s.Trip(trip, "u_you")
-	if v.Balance != domain.Rupees(15192) || v.MemberDetails[0].Left != domain.Rupees(3798) {
-		t.Fatalf("after deposit: balance %d, your share %d", v.Balance, v.MemberDetails[0].Left)
-	}
-	checkBooks(t, s)
+	return s, nil
 }
 
-func TestSplit(t *testing.T) {
-	people := []domain.SplitInput{{UserID: "a", Weight: 2}, {UserID: "b", Weight: 1}, {UserID: "c", Weight: 1}}
-	eq, _ := domain.Split(1000, domain.SplitEqual, people) // ₹10.00 between three
-	if eq[0].Amount != 334 || eq[1].Amount != 333 || eq[2].Amount != 333 {
-		t.Fatalf("equal: %+v", eq)
-	}
-	sh, _ := domain.Split(1000, domain.SplitShares, people)
-	if sh[0].Amount != 500 || sh[1].Amount != 250 || sh[2].Amount != 250 {
-		t.Fatalf("shares: %+v", sh)
-	}
-	if _, err := domain.Split(1000, domain.SplitExact, []domain.SplitInput{{UserID: "a", Exact: 600}, {UserID: "b", Exact: 300}}); err == nil {
-		t.Fatal("exact amounts that do not add up were accepted")
-	}
-}
+func TestStateSurvivesRestart(t *testing.T) {
+	st := &memStore{}
+	s, _, _ := newTestService(t, st)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 1000)
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(100), PayeeUserID: d}))
 
-func TestInsightsAndSuggestion(t *testing.T) {
-	s, _ := demo(t)
-	in, _ := s.Insights(trip, "u_you")
-	if in.PerPerson != domain.Rupees(2202) || in.ForecastLeft != domain.Rupees(4380) {
-		t.Fatalf("per person %d, forecast %d", in.PerPerson, in.ForecastLeft)
+	s2, _, _ := newTestService(t, st)
+	if balance(s2, a) != domain.Rupees(900) || balance(s2, d) != domain.Rupees(100) {
+		t.Fatalf("after restart: %d %d", balance(s2, a), balance(s2, d))
 	}
-	if in.ByCategory[0].Key != "stay" || in.ByCategory[0].Percent != 41 || in.ByTimeOfDay[1].Amount != domain.Rupees(5688) {
-		t.Fatalf("category %+v, time %+v", in.ByCategory, in.ByTimeOfDay)
-	}
-	sg := s.Suggest("u_you", SuggestInput{PlaceType: "restaurant"})
-	if sg.Wallet != "trip" || sg.Category != domain.Food || len(sg.Participants) != 4 {
-		t.Fatalf("suggestion: %+v", sg)
-	}
-	if sg := s.Suggest("u_you", SuggestInput{PlaceType: "pharmacy"}); sg.Wallet != "personal" {
-		t.Fatalf("a pharmacy should stay personal: %+v", sg)
-	}
-}
-
-func TestAssistantWaitsForConfirmation(t *testing.T) {
-	s, _ := demo(t)
-	ctx := context.Background()
-	// A fresh trip where nobody has paid yet.
-	tv, err := s.CreateTrip("u_you", CreateTripInput{Name: "Hampi", Start: DemoNow.AddDate(0, 1, 0), End: DemoNow.AddDate(0, 1, 2), Members: []string{"u_asha", "u_dev"}, DepositTarget: domain.Rupees(2000)})
-	if err != nil {
+	if _, err := s2.Login("9123456780", "246810"); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.DraftPlan(tv.ID, "u_you", "Collect ₹2,500 from everyone by 9 Nov")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.PerPerson != domain.Rupees(2500) || p.Due.Day() != 9 || p.Due.Month() != time.November || p.Total != domain.Rupees(7500) {
-		t.Fatalf("plan: %+v", p)
-	}
-	if rs, _ := s.Requests(tv.ID, "u_you"); len(rs) != 0 {
-		t.Fatal("requests were sent before the plan was confirmed")
-	}
-	rs, err := s.ConfirmPlan(ctx, tv.ID, p.ID, "u_you")
-	if err != nil || len(rs) != 2 { // the organiser pays in the app, the other two get requests
-		t.Fatalf("confirm: %v, %d requests", err, len(rs))
-	}
-	if _, err := s.ConfirmPlan(ctx, tv.ID, p.ID, "u_you"); code(err) != "plan_already_confirmed" {
-		t.Fatalf("second confirm: %v", err)
-	}
-	for i := 0; i < 2; i++ {
-		if _, err := s.Remind(ctx, rs[0].ID, "u_you"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Remind(ctx, rs[0].ID, "u_you"); code(err) != "reminder_cap" {
-		t.Fatalf("third reminder in a day: %v", err)
-	}
-	for i := 0; i < 2; i++ { // a repeated webhook must not credit twice
-		if err := s.HandleWebhook(ctx, "INVOICING.INVOICE.PAID", rs[0].InvoiceID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if v, _ := s.Trip(tv.ID, "u_you"); v.Balance != domain.Rupees(2500) {
-		t.Fatalf("balance after one paid request: %d", v.Balance)
-	}
-}
-
-func TestSettleRefundsEveryoneAndCloses(t *testing.T) {
-	s, pp := demo(t)
-	ctx := context.Background()
-	if _, err := s.Settle(ctx, trip, "u_asha"); code(err) != "forbidden" {
-		t.Fatalf("a member who is not the organiser settled the trip: %v", err)
-	}
-	out, err := s.Settle(ctx, trip, "u_you")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Refund != domain.Rupees(12192) || out.Lines[0].Refund != domain.Rupees(798) || len(pp.Payouts[0]) != 4 {
-		t.Fatalf("settlement: %+v", out)
-	}
-	v, _ := s.Trip(trip, "u_you")
-	if v.Balance != 0 || v.Status != domain.TripSettled {
-		t.Fatalf("after settle: balance %d, status %s", v.Balance, v.Status)
-	}
-	if _, err := s.AddExpense(ctx, trip, "u_you", dinner(true)); code(err) != "trip_closed" {
-		t.Fatalf("a settled trip accepted a payment: %v", err)
-	}
-	checkBooks(t, s)
+	checkBooks(t, s2)
 }

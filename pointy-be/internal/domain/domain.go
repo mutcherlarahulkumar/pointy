@@ -38,9 +38,48 @@ func Conflict(code, msg string, details any) *Error {
 }
 
 type User struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	PayPalEmail string `json:"paypal_email"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Phone       string    `json:"phone,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	// PinHash is a bcrypt hash of the 6-digit PIN. It is never sent out.
+	PinHash string `json:"-"`
+	// AlertsSeenAt is when the person last opened their alerts, for the
+	// unread badge.
+	AlertsSeenAt time.Time `json:"-"`
+}
+
+// PublicUser is what other people may see about someone.
+type PublicUser struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
+func (u *User) Public() PublicUser { return PublicUser{ID: u.ID, Name: u.Name, Phone: u.Phone} }
+
+// Session is a signed-in device. Only a hash of the token is stored, so a
+// leaked database cannot be used to sign in.
+type Session struct {
+	TokenHash string
+	UserID    string
+	CreatedAt time.Time
+}
+
+// SessionEnd marks a session to delete (sign out).
+type SessionEnd struct{ TokenHash string }
+
+// MoneyRequest is one person asking another for money from their personal
+// balance, like a UPI collect request.
+type MoneyRequest struct {
+	ID          string     `json:"id"`
+	RequesterID string     `json:"requester_id"` // gets the money
+	PayerID     string     `json:"payer_id"`     // is asked to pay
+	Amount      Paise      `json:"amount_paise"`
+	Note        string     `json:"note"`
+	Status      string     `json:"status"` // open, paid, declined
+	CreatedAt   time.Time  `json:"created_at"`
+	ClosedAt    *time.Time `json:"closed_at,omitempty"`
 }
 
 type Category string
@@ -117,6 +156,8 @@ type Deposit struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// A Deposit with an empty TripID is a top-up of the person's own balance.
+
 type Share struct {
 	UserID string `json:"user_id"`
 	Amount Paise  `json:"amount_paise"`
@@ -129,15 +170,15 @@ type Expense struct {
 	Description string    `json:"description"`
 	Category    Category  `json:"category"`
 	Amount      Paise     `json:"amount_paise"`
-	Mode        string    `json:"mode"` // paypal_payee or reimburse
-	Payee       string    `json:"payee"`
+	Mode        string    `json:"mode"`  // trip: member or reimburse; personal: transfer
+	Payee       string    `json:"payee"` // who was paid, as shown on the receipt
+	PayeeUserID string    `json:"payee_user_id"` // the Pointy user whose balance received the money
 	Shares      []Share   `json:"shares"`
 	PlaceName   string    `json:"place_name"`
 	PlaceType   string    `json:"place_type"`
 	Lat         float64   `json:"lat,omitempty"`
 	Lng         float64   `json:"lng,omitempty"`
 	At          time.Time `json:"at"`
-	PayoutID    string    `json:"paypal_payout_id"`
 }
 
 type DepositRequest struct {
@@ -146,19 +187,18 @@ type DepositRequest struct {
 	UserID        string      `json:"user_id"`
 	Amount        Paise       `json:"amount_paise"`
 	Due           time.Time   `json:"due"`
-	InvoiceID     string      `json:"paypal_invoice_id"`
-	PayURL        string      `json:"pay_url"`
-	Status        string      `json:"status"` // sent, paid
+	Status        string      `json:"status"` // open, paid
 	RemindersSent int         `json:"reminders_sent"`
 	Reminders     []time.Time `json:"reminders"`
 	PaidAt        *time.Time  `json:"paid_at,omitempty"`
+	PaidVia       string      `json:"paid_via,omitempty"` // balance or paypal
 }
 
 type PlanItem struct {
 	UserID  string `json:"user_id"`
 	Name    string `json:"name"`
 	Amount  Paise  `json:"amount_paise"`
-	Channel string `json:"channel"` // in_app, paypal_request, already_paid
+	Channel string `json:"channel"` // request, organiser, already_paid
 }
 
 // Plan is what the deposit assistant drafts. Nothing is sent while Status is
@@ -179,7 +219,7 @@ type Alert struct {
 	ID     string    `json:"id"`
 	TripID string    `json:"trip_id,omitempty"`
 	UserID string    `json:"user_id,omitempty"` // empty means everyone on the trip
-	Kind   string    `json:"kind"`              // budget, deposit, payment, share, assistant
+	Kind   string    `json:"kind"`              // budget, deposit, payment, share, assistant, trip, money
 	Title  string    `json:"title"`
 	Body   string    `json:"body"`
 	At     time.Time `json:"at"`
