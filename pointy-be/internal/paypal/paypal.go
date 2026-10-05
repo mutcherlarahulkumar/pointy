@@ -1,8 +1,10 @@
-// Package paypal is the payment rail for money coming into Pointy. Indian
-// PayPal accounts cannot pay each other and the Payouts API is not offered
-// in India, so Pointy uses PayPal only for checkout (the Orders API): a
-// person approves a payment on PayPal and the money lands in Pointy's
-// business account. Everything after that moves inside Pointy's ledger.
+// Package paypal is Pointy's payment rail. Money comes in with checkout (the
+// Orders API): a person approves a payment and it lands in Pointy's PayPal
+// business account. Money goes out with Payouts: from that business account
+// to a real PayPal account (a withdrawal, a shop paid from a trip wallet, a
+// refund at settle-up). In between, Pointy's ledger records whose money it
+// is. (Payouts is not offered to Indian accounts; the demo uses a US sandbox
+// business account.)
 package paypal
 
 import (
@@ -29,6 +31,31 @@ type Client interface {
 	CaptureOrder(ctx context.Context, orderID string) error
 	// VerifyWebhook checks that a webhook really came from PayPal.
 	VerifyWebhook(ctx context.Context, h http.Header, body []byte) error
+	// SendPayout pays amount from Pointy's business account to the PayPal
+	// account with this email. ref makes a retry safe: PayPal refuses a
+	// second payout with the same ref.
+	SendPayout(ctx context.Context, ref, email string, amount domain.Paise, note string) (Payout, error)
+	// PayoutStatus reads where a payout is now.
+	PayoutStatus(ctx context.Context, batchID string) (string, error)
+}
+
+// Payout is PayPal's answer to a payout.
+type Payout struct {
+	BatchID string
+	ItemID  string
+	// Status is PayPal's: PENDING, PROCESSING, SUCCESS, UNCLAIMED, ONHOLD,
+	// FAILED, RETURNED, BLOCKED, REFUNDED, DENIED.
+	Status string
+}
+
+// PayoutFailed says whether a payout status means the money did not leave
+// (or came back), so Pointy must give it back to the person.
+func PayoutFailed(status string) bool {
+	switch status {
+	case "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "DENIED", "CANCELED":
+		return true
+	}
+	return false
 }
 
 // Mock behaves like PayPal without leaving the process: every order can be
@@ -38,6 +65,12 @@ type Mock struct {
 	// FailCapture makes CaptureOrder return an error, for tests.
 	FailCapture bool
 	Captured    []string
+	// FailPayout makes SendPayout return an error; PayoutLater sets the
+	// status PayoutStatus reports next (for example RETURNED), for tests.
+	FailPayout  bool
+	PayoutFirst string // the status SendPayout answers; SUCCESS when empty
+	PayoutLater string
+	Payouts     []string // emails paid
 }
 
 func (m *Mock) Mode() string { return "mock" }
@@ -60,3 +93,26 @@ func (m *Mock) CaptureOrder(_ context.Context, orderID string) error {
 }
 
 func (m *Mock) VerifyWebhook(context.Context, http.Header, []byte) error { return nil }
+
+func (m *Mock) SendPayout(_ context.Context, ref, email string, _ domain.Paise, _ string) (Payout, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailPayout {
+		return Payout{}, fmt.Errorf("mock payout failure")
+	}
+	m.Payouts = append(m.Payouts, email)
+	status := m.PayoutFirst
+	if status == "" {
+		status = "SUCCESS"
+	}
+	return Payout{BatchID: "BATCH-MOCK-" + ref, ItemID: "ITEM-MOCK-" + ref, Status: status}, nil
+}
+
+func (m *Mock) PayoutStatus(_ context.Context, _ string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.PayoutLater != "" {
+		return m.PayoutLater, nil
+	}
+	return "SUCCESS", nil
+}

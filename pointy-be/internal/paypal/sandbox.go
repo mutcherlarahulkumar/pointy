@@ -163,3 +163,54 @@ func (s *Sandbox) VerifyWebhook(ctx context.Context, h http.Header, body []byte)
 	}
 	return nil
 }
+
+// SendPayout sends one payout item from the business account (Payouts API).
+// The Payouts feature must be on for the sandbox app.
+func (s *Sandbox) SendPayout(ctx context.Context, ref, email string, amount domain.Paise, note string) (Payout, error) {
+	in := map[string]any{
+		"sender_batch_header": map[string]any{
+			"sender_batch_id": ref,
+			"email_subject":   "You have money from Pointy",
+			"email_message":   note,
+		},
+		"items": []map[string]any{{
+			"recipient_type": "EMAIL",
+			"receiver":       email,
+			"amount":         s.money(amount),
+			"note":           note,
+			"sender_item_id": ref,
+		}},
+	}
+	var out struct {
+		BatchHeader struct {
+			PayoutBatchID string `json:"payout_batch_id"`
+			BatchStatus   string `json:"batch_status"`
+		} `json:"batch_header"`
+	}
+	if err := s.call(ctx, http.MethodPost, "/v1/payments/payouts", ref, in, &out); err != nil {
+		return Payout{}, err
+	}
+	if out.BatchHeader.PayoutBatchID == "" {
+		return Payout{}, fmt.Errorf("paypal: payout answer has no batch id")
+	}
+	return Payout{BatchID: out.BatchHeader.PayoutBatchID, Status: out.BatchHeader.BatchStatus}, nil
+}
+
+// PayoutStatus reads the one item of a payout batch.
+func (s *Sandbox) PayoutStatus(ctx context.Context, batchID string) (string, error) {
+	var out struct {
+		BatchHeader struct {
+			BatchStatus string `json:"batch_status"`
+		} `json:"batch_header"`
+		Items []struct {
+			TransactionStatus string `json:"transaction_status"`
+		} `json:"items"`
+	}
+	if err := s.call(ctx, http.MethodGet, "/v1/payments/payouts/"+batchID, "", nil, &out); err != nil {
+		return "", err
+	}
+	if len(out.Items) > 0 && out.Items[0].TransactionStatus != "" {
+		return out.Items[0].TransactionStatus, nil
+	}
+	return out.BatchHeader.BatchStatus, nil
+}

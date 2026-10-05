@@ -19,6 +19,9 @@ type SettleLine struct {
 	Deposited Paise             `json:"deposited_paise"`
 	Used      Paise             `json:"used_paise"`
 	Refund    Paise             `json:"refund_paise"`
+	// HasPayPal says whether the person gave a PayPal email, so settle-up
+	// can pay their part straight to PayPal.
+	HasPayPal bool `json:"has_paypal"`
 }
 
 type Settlement struct {
@@ -28,13 +31,15 @@ type Settlement struct {
 	Spent     Paise        `json:"spent_paise"`
 	Refund    Paise        `json:"refund_paise"`
 	Lines     []SettleLine `json:"lines"`
+	// Payouts are the refunds sent on to PayPal when settling with payouts.
+	Payouts []*domain.Payout `json:"payouts,omitempty"`
 }
 
 func (s *Service) settlementL(t *domain.Trip) Settlement {
 	v := s.tripViewL(t)
 	out := Settlement{TripID: t.ID, Status: t.Status, Deposited: v.Deposited, Spent: v.Spent}
 	for _, m := range v.MemberDetails {
-		out.Lines = append(out.Lines, SettleLine{User: m.User, Deposited: m.Deposited, Used: m.Used, Refund: m.Left})
+		out.Lines = append(out.Lines, SettleLine{User: m.User, Deposited: m.Deposited, Used: m.Used, Refund: m.Left, HasPayPal: s.users[m.User.ID] != nil && s.users[m.User.ID].PayPalEmail != ""})
 		out.Refund += m.Left
 	}
 	return out
@@ -52,12 +57,48 @@ func (s *Service) SettlementPreview(tripID, userID string) (Settlement, error) {
 
 // Settle returns what each member did not use to their Pointy balance and
 // closes the trip. Only the organiser can do it.
-func (s *Service) Settle(tripID, userID string) (Settlement, error) {
+// Settle closes the trip: what is left in each share goes back to that
+// person's balance. With payout set, it then goes on to the PayPal account
+// of everyone who gave one (each a separate payout; one failing leaves that
+// money in the person's balance).
+func (s *Service) Settle(ctx context.Context, tripID, userID string, payout bool) (Settlement, error) {
+	plan, err := s.settle(tripID, userID)
+	if err != nil || !payout {
+		return plan, err
+	}
+	name := s.tripName(tripID)
+	for _, l := range plan.Lines {
+		if l.Refund <= 0 || !l.HasPayPal {
+			continue
+		}
+		p, err := s.withdraw(ctx, l.User.ID, l.Refund, PayoutSettle, tripID, "What was left of "+name)
+		if err != nil && p == nil {
+			log.Printf("settle payout for %s: %v", l.User.ID, err)
+			continue
+		}
+		plan.Payouts = append(plan.Payouts, p)
+	}
+	return plan, nil
+}
+
+func (s *Service) tripName(tripID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.trips[tripID]; t != nil {
+		return t.Name
+	}
+	return "the trip"
+}
+
+func (s *Service) settle(tripID, userID string) (Settlement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, err := s.openTripL(tripID, userID)
 	if err == nil && t.OrganiserID != userID {
 		err = domain.Forbidden("only the organiser can settle the trip")
+	}
+	if err == nil && s.holdsOnTripL(tripID) {
+		err = domain.Conflict("payment_in_progress", "a PayPal payment from this trip is still going through; settle in a moment", nil)
 	}
 	if err != nil {
 		return Settlement{}, err

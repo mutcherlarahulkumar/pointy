@@ -57,6 +57,11 @@ type Service struct {
 	alerts        []*domain.Alert
 	moneyRequests []*domain.MoneyRequest
 	chats         map[string][]*domain.ChatMessage // user id -> conversation with the AI
+	payouts       []*domain.Payout                 // money paid out to PayPal accounts
+	// holds is money set aside while a PayPal payout is being sent, so it
+	// cannot be spent twice in the meantime. Never stored: a payout either
+	// finishes (and is posted) or is released.
+	holds map[string]Paise
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
@@ -81,7 +86,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{},
+		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
 	}
 }
 
@@ -509,8 +514,8 @@ func (s *Service) DepositFromBalance(tripID, userID string, amount Paise) (TripV
 // moving the backing money between the two PayPal pools in the same entry.
 func (s *Service) balanceToTripL(t *domain.Trip, userID string, amount Paise, ref string) error {
 	acc := domain.PersonalAccount(userID)
-	if s.ledger.Owed(acc) < amount {
-		return domain.Conflict("insufficient_balance", "your balance is "+INR(s.ledger.Owed(acc))+"; add money first", map[string]any{"balance_paise": s.ledger.Owed(acc)})
+	if s.availL(acc) < amount {
+		return domain.Conflict("insufficient_balance", "your balance is "+INR(s.availL(acc))+"; add money first", map[string]any{"balance_paise": s.availL(acc)})
 	}
 	return s.postL(domain.Entry{ID: s.idL("je"), Kind: "deposit", TripID: t.ID, Ref: ref, At: s.now(), Postings: []domain.Posting{
 		{Account: acc, Debit: amount},
@@ -580,6 +585,9 @@ func (s *Service) History(userID string) []HistoryItem {
 		}
 		if mine {
 			h := HistoryItem{Kind: "payment", Wallet: "personal", Title: e.Description, Subtitle: "To " + e.Payee, Category: e.Category, Amount: e.Amount, YourPart: part, PlaceName: e.PlaceName, At: e.At}
+			if e.Mode == ModePayPal {
+				h.Subtitle += " by PayPal"
+			}
 			if e.TripID != "" {
 				h.Wallet, h.TripID, h.TripName = "trip", e.TripID, s.trips[e.TripID].Name
 			}
@@ -619,6 +627,18 @@ func (s *Service) History(userID string) []HistoryItem {
 				}
 			}
 		}
+	}
+	// Money sent to your own PayPal account.
+	for _, p := range s.payouts {
+		if p.UserID != userID || p.Kind == PayoutMerchant || p.Status == "failed" {
+			continue
+		}
+		h := HistoryItem{Kind: "withdrawal", Wallet: "personal", TripID: p.TripID, Title: "Sent to your PayPal", Subtitle: p.Email + " · " + payoutWords(p.Status),
+			Amount: p.Amount, YourPart: p.Amount, At: p.CreatedAt}
+		if p.Kind == PayoutSettle {
+			h.Title = p.Description
+		}
+		out = append(out, h)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	return out

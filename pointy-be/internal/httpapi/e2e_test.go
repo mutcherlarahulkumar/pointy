@@ -35,7 +35,7 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, trips, users, schema_migrations CASCADE`)
+		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, payouts, trips, users, schema_migrations CASCADE`)
 		conn.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -189,6 +189,21 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 	if len(call(dev, "GET", "/api/history", nil, 200)["list"].([]any)) < 4 {
 		t.Fatal("Dev's history is short")
 	}
+	// Money out through PayPal: Asha links her PayPal and withdraws ₹1,000.
+	call(asha, "POST", "/api/withdrawals", map[string]any{"amount_paise": 100000}, 409) // no PayPal email yet
+	call(asha, "PUT", "/api/me/paypal", map[string]string{"email": "asha@example.com"}, 200)
+	po := call(asha, "POST", "/api/withdrawals", map[string]any{"amount_paise": 100000}, 201)
+	if po["status"] != "paid" || po["email"] != "asha@example.com" {
+		t.Fatalf("withdrawal %v", po)
+	}
+	m := call(asha, "GET", "/api/money", nil, 200)
+	if m["balanced"] != true || num(m["your_balance_paise"]) != 276000 || num(m["you_paid_out_paise"]) != 100000 {
+		t.Fatalf("money view %v", m)
+	}
+	if len(call(asha, "GET", "/api/payouts", nil, 200)["list"].([]any)) != 1 {
+		t.Fatal("payout not listed")
+	}
+
 	// Sign out on one phone ends that session only.
 	call(dev, "POST", "/api/auth/logout", nil, 201)
 	call(dev, "GET", "/api/me", nil, 401)
