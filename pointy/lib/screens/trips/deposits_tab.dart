@@ -2,18 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../api.dart';
 import '../../dates.dart';
-import '../../models.dart';
 import '../../money.dart';
+import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/ai_card.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/avatar.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/tag.dart';
 import '../assistant/assistant.dart';
 import '../assistant/request_view.dart';
 
-/// Deposits tab: how much is collected, who has paid, and the requests and
-/// reminders the assistant sent.
+/// Deposits tab: how much is collected, who has paid, your own request if
+/// the organiser asked you, and the requests the assistant sent.
 class DepositsTab extends StatefulWidget {
   const DepositsTab({super.key, required this.trip, required this.me, required this.onChanged});
 
@@ -33,15 +34,19 @@ class _DepositsTabState extends State<DepositsTab> {
     widget.onChanged();
   }
 
+  Future<void> _go(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    _reload();
+  }
+
   Future<void> _remind(DepositRequest r) async {
     try {
       await api.remind(r.id, key: newIdempotencyKey());
       if (!mounted) return;
-      showMessage(context, 'Reminder sent to ${widget.trip.nameOf(r.userId)}');
+      showMessage(context, 'Reminder sent to ${firstName(r.user.name)}');
       _reload();
     } on ApiException catch (e) {
-      if (!mounted) return;
-      showError(context, e.code == 'reminder_cap' ? 'PayPal allows 2 reminders a day. Try again tomorrow.' : e.message);
+      if (mounted) showError(context, e.code == 'reminder_cap' ? 'Two reminders a day is the limit. Try tomorrow.' : e.message);
     }
   }
 
@@ -50,96 +55,134 @@ class _DepositsTabState extends State<DepositsTab> {
     final t = widget.trip;
     final organiser = t.organiserId == widget.me.user.id;
     final target = t.targetPaise == 0 ? 1 : t.targetPaise;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        SurfaceCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Collected', style: AppText.detail()),
-              Text('${formatPaise(t.depositedPaise)} of ${formatPaise(t.targetPaise)}', style: AppText.heading()),
-              const SizedBox(height: 10),
-              Bar(fraction: t.depositedPaise / target),
-              const SizedBox(height: 6),
-              Text('${formatPaise(t.depositTargetPaise)} each from ${t.members.length} people', style: AppText.small()),
-            ],
+    return RefreshIndicator(
+      onRefresh: () async => _reload(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          SurfaceCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Collected', style: AppText.detail()),
+                Text(t.targetPaise == 0 ? formatPaise(t.depositedPaise) : '${formatPaise(t.depositedPaise)} of ${formatPaise(t.targetPaise)}',
+                    style: AppText.heading()),
+                const SizedBox(height: 10),
+                Bar(fraction: t.depositedPaise / target),
+                const SizedBox(height: 6),
+                Text(t.depositTargetPaise == 0 ? 'No deposit set' : '${formatPaise(t.depositTargetPaise)} each from ${t.members.length} people',
+                    style: AppText.small()),
+              ],
+            ),
           ),
-        ),
-        const SectionTitle('Who has paid'),
-        SurfaceCard(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: Column(
-            children: [
-              for (final m in t.memberDetails)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(backgroundColor: AppColors.pine100, child: Text(m.user.name[0])),
-                  title: Text(m.user.name, style: AppText.body()),
-                  subtitle: Text('${formatPaise(m.depositedPaise)} of ${formatPaise(t.depositTargetPaise)}',
-                      style: AppText.detail()),
-                  trailing: m.depositedPaise >= t.depositTargetPaise
-                      ? const Tag('Paid', kind: TagKind.trip)
-                      : const Tag('Pending', kind: TagKind.pending),
+          FutureBuilder<List<DepositRequest>>(
+            future: _requests,
+            builder: (context, snap) {
+              final mine = (snap.data ?? const <DepositRequest>[]).where((r) => r.user.id == widget.me.user.id && r.isOpen).toList();
+              if (mine.isEmpty) return const SizedBox.shrink();
+              final r = mine.first;
+              return Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Material(
+                  color: AppColors.pendingBg,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _go(RequestViewScreen(trip: t, request: r)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.notification_important_outlined, color: AppColors.pending),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('You owe ${formatPaise(r.amountPaise)}', style: AppText.body(color: AppColors.pending, weight: FontWeight.w700)),
+                                Text('Due ${formatWeekday(r.due)} · tap to pay', style: AppText.detail(color: AppColors.pending)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, color: AppColors.pending),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-            ],
+              );
+            },
           ),
-        ),
-        if (organiser && t.isOpen) ...[
-          const SizedBox(height: 16),
-          AiCard(
-            title: 'Let the assistant collect deposits',
-            body: 'Tell it how much and by when. It drafts the requests and waits for your OK.',
-            actionLabel: 'Open the assistant',
-            onTap: () async {
-              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => AssistantScreen(trip: t)));
-              _reload();
+          const SectionTitle('Who has paid'),
+          SurfaceCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                for (final m in t.memberDetails)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Avatar(m.user.name),
+                    title: Text(m.user.name, style: AppText.body()),
+                    subtitle: Text(
+                        t.depositTargetPaise == 0 ? 'Put in ${formatPaise(m.depositedPaise)}' : '${formatPaise(m.depositedPaise)} of ${formatPaise(t.depositTargetPaise)}',
+                        style: AppText.detail()),
+                    trailing: t.depositTargetPaise == 0
+                        ? null
+                        : (m.depositedPaise >= t.depositTargetPaise ? const Tag('Paid', kind: TagKind.trip) : const Tag('Pending', kind: TagKind.pending)),
+                  ),
+              ],
+            ),
+          ),
+          if (organiser && t.isOpen) ...[
+            const SizedBox(height: 16),
+            AiCard(
+              title: 'Let the assistant collect deposits',
+              body: 'Say how much and by when. It drafts a request for each person and waits for your OK.',
+              actionLabel: 'Open the assistant',
+              onTap: () => _go(AssistantScreen(trip: t)),
+            ),
+          ],
+          const SectionTitle('Requests and reminders'),
+          FutureBuilder<List<DepositRequest>>(
+            future: _requests,
+            builder: (context, snap) {
+              if (snap.hasError) return Text('${snap.error}', style: AppText.detail(color: AppColors.error));
+              if (!snap.hasData) return const LinearProgressIndicator();
+              if (snap.data!.isEmpty) return Text('No requests sent yet.', style: AppText.detail());
+              return Column(children: [for (final r in snap.data!) _requestRow(r, organiser)]);
             },
           ),
         ],
-        const SectionTitle('Requests and reminders'),
-        FutureBuilder<List<DepositRequest>>(
-          future: _requests,
-          builder: (context, snap) {
-            if (snap.hasError) return Text('${snap.error}', style: AppText.detail(color: AppColors.error));
-            if (!snap.hasData) return const LinearProgressIndicator();
-            if (snap.data!.isEmpty) return Text('No requests sent yet.', style: AppText.detail());
-            return Column(children: [for (final r in snap.data!) _requestRow(r, organiser)]);
-          },
-        ),
-      ],
+      ),
     );
   }
 
   Widget _requestRow(DepositRequest r, bool organiser) {
-    final who = widget.trip.nameOf(r.userId);
-    final reminders = r.remindersSent == 0
-        ? 'no reminders'
-        : '${r.remindersSent} reminder${r.remindersSent == 1 ? '' : 's'}';
+    final reminders = r.remindersSent == 0 ? 'no reminders' : '${r.remindersSent} reminder${r.remindersSent == 1 ? '' : 's'}';
+    final (label, kind) = switch (r.status) {
+      'paid' => ('Paid', TagKind.trip),
+      'cancelled' => ('Cancelled', TagKind.plain),
+      _ => ('Waiting', TagKind.pending),
+    };
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Card(
         child: ListTile(
-          title: Text('$who · ${formatPaise(r.amountPaise)}', style: AppText.body(weight: FontWeight.w600)),
+          leading: Avatar(r.user.name, size: 40),
+          title: Text('${r.user.name} · ${formatPaise(r.amountPaise)}', style: AppText.body(weight: FontWeight.w600)),
           subtitle: Text(
-            r.isPaid
-                ? 'Paid ${r.paidAt == null ? '' : formatDay(r.paidAt!)} · $reminders'
+            r.status == 'paid'
+                ? 'Paid ${r.paidAt == null ? '' : formatDay(r.paidAt!)}${r.paidVia.isEmpty ? '' : ' via ${r.paidVia == 'balance' ? 'balance' : 'PayPal'}'}'
                 : 'Due ${formatDay(r.due)} · $reminders',
             style: AppText.detail(),
           ),
-          trailing: r.isPaid
-              ? const Tag('Paid', kind: TagKind.trip)
-              : organiser && widget.trip.isOpen
-                  ? TextButton(onPressed: () => _remind(r), child: const Text('Remind'))
-                  : const Tag('Pending', kind: TagKind.pending),
-          onTap: () async {
-            await Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => RequestViewScreen(trip: widget.trip, request: r, isMock: widget.me.isMock),
-            ));
-            _reload();
-          },
+          trailing: r.isOpen && organiser && r.user.id != widget.me.user.id && widget.trip.isOpen
+              ? TextButton(onPressed: () => _remind(r), child: const Text('Remind'))
+              : Tag(label, kind: kind),
+          onTap: r.user.id == widget.me.user.id && r.isOpen ? () => _go(RequestViewScreen(trip: widget.trip, request: r)) : null,
         ),
       ),
     );
   }
 }
+

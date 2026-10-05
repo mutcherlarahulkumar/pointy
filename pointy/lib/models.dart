@@ -7,31 +7,72 @@ int _int(dynamic v) => (v as num?)?.toInt() ?? 0;
 String _str(dynamic v) => (v as String?) ?? '';
 List<T> _list<T>(dynamic v, T Function(Map<String, dynamic>) f) =>
     ((v as List?) ?? const []).map((e) => f(e as Map<String, dynamic>)).toList();
+Map<String, dynamic> _map(dynamic v) => (v as Map<String, dynamic>?) ?? const {};
 
 const categories = ['food', 'stay', 'transport', 'other'];
 
 String categoryLabel(String c) => c.isEmpty ? 'Other' : '${c[0].toUpperCase()}${c.substring(1)}';
 
-class User {
+/// First name, for greetings: "Asha Rao" -> "Asha".
+String firstName(String name) => name.trim().split(RegExp(r'\s+')).first;
+
+/// Up to two initials for an avatar.
+String initials(String name) {
+  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+  if (parts.isEmpty) return '?';
+  return parts.take(2).map((p) => p[0].toUpperCase()).join();
+}
+
+/// "98765 43210"
+String formatPhone(String p) => p.length == 10 ? '${p.substring(0, 5)} ${p.substring(5)}' : p;
+
+/// Someone on Pointy, as other people see them.
+class Person {
   final String id;
   final String name;
-  final String paypalEmail;
-  User({required this.id, required this.name, required this.paypalEmail});
+  final String phone;
+  Person({required this.id, required this.name, required this.phone});
 
-  factory User.fromJson(Map<String, dynamic> j) =>
-      User(id: _str(j['id']), name: _str(j['name']), paypalEmail: _str(j['paypal_email']));
+  factory Person.fromJson(Map<String, dynamic> j) => Person(id: _str(j['id']), name: _str(j['name']), phone: _str(j['phone']));
+
+  @override
+  bool operator ==(Object other) => other is Person && other.id == id;
+  @override
+  int get hashCode => id.hashCode;
+}
+
+class AuthResult {
+  final String token;
+  final Person user;
+  AuthResult(this.token, this.user);
+
+  factory AuthResult.fromJson(Map<String, dynamic> j) => AuthResult(_str(j['token']), Person.fromJson(_map(j['user'])));
+}
+
+class PhoneCheck {
+  final String phone;
+  final bool exists;
+  final String firstName;
+  PhoneCheck(this.phone, this.exists, this.firstName);
+
+  factory PhoneCheck.fromJson(Map<String, dynamic> j) =>
+      PhoneCheck(_str(j['phone']), j['exists'] == true, _str(j['first_name']));
 }
 
 class Me {
-  final User user;
+  final Person user;
   final int personalBalancePaise;
   final String activeTripId;
+  final int unreadAlerts;
+  final int openRequests;
   final String paypalMode;
   final DateTime now;
   Me({
     required this.user,
     required this.personalBalancePaise,
     required this.activeTripId,
+    required this.unreadAlerts,
+    required this.openRequests,
     required this.paypalMode,
     required this.now,
   });
@@ -39,23 +80,25 @@ class Me {
   bool get isMock => paypalMode == 'mock';
 
   factory Me.fromJson(Map<String, dynamic> j) => Me(
-        user: User.fromJson(j['user'] as Map<String, dynamic>),
+        user: Person.fromJson(_map(j['user'])),
         personalBalancePaise: _int(j['personal_balance_paise']),
         activeTripId: _str(j['active_trip_id']),
+        unreadAlerts: _int(j['unread_alerts']),
+        openRequests: _int(j['open_requests']),
         paypalMode: _str(j['paypal_mode']),
         now: parseIst(j['now'] as String?),
       );
 }
 
 class MemberDetail {
-  final User user;
+  final Person user;
   final int depositedPaise;
   final int usedPaise;
   final int leftPaise;
   MemberDetail({required this.user, required this.depositedPaise, required this.usedPaise, required this.leftPaise});
 
   factory MemberDetail.fromJson(Map<String, dynamic> j) => MemberDetail(
-        user: User.fromJson(j['user'] as Map<String, dynamic>),
+        user: Person.fromJson(_map(j['user'])),
         depositedPaise: _int(j['deposited_paise']),
         usedPaise: _int(j['used_paise']),
         leftPaise: _int(j['left_paise']),
@@ -103,7 +146,13 @@ class Trip {
 
   bool get isOpen => status == 'open';
 
-  /// The member's details, or null if they are not on this trip.
+  /// "Day 2 of 5", "Starts 20 Oct" or "12 – 16 Oct".
+  String get when {
+    if (day > 0 && day <= days && isOpen) return 'Day $day of $days';
+    if (day == 0) return 'Starts ${formatDay(start)}';
+    return '${formatDay(start)} – ${formatDay(end)}';
+  }
+
   MemberDetail? member(String userId) {
     for (final m in memberDetails) {
       if (m.user.id == userId) return m;
@@ -111,7 +160,7 @@ class Trip {
     return null;
   }
 
-  String nameOf(String userId) => member(userId)?.user.name ?? userId;
+  String nameOf(String userId) => member(userId)?.user.name ?? 'Someone';
 
   factory Trip.fromJson(Map<String, dynamic> j) => Trip(
         id: _str(j['id']),
@@ -139,26 +188,14 @@ class Suggestion {
   final String category;
   final String wallet; // trip or personal
   final String tripId;
-  final String splitMethod;
-  final List<String> participants;
   final List<String> reasons;
-  Suggestion({
-    required this.title,
-    required this.category,
-    required this.wallet,
-    required this.tripId,
-    required this.splitMethod,
-    required this.participants,
-    required this.reasons,
-  });
+  Suggestion({required this.title, required this.category, required this.wallet, required this.tripId, required this.reasons});
 
   factory Suggestion.fromJson(Map<String, dynamic> j) => Suggestion(
         title: _str(j['title']),
         category: _str(j['category']),
         wallet: _str(j['wallet']),
         tripId: _str(j['trip_id']),
-        splitMethod: _str(j['split_method']),
-        participants: ((j['participants'] as List?) ?? const []).cast<String>(),
         reasons: ((j['reasons'] as List?) ?? const []).cast<String>(),
       );
 }
@@ -178,12 +215,12 @@ class Expense {
   final String description;
   final String category;
   final int amountPaise;
-  final String mode;
+  final String mode; // member, reimburse, transfer
   final String payee;
+  final String payeeUserId;
   final List<Share> shares;
   final String placeName;
   final DateTime at;
-  final String paypalPayoutId;
   Expense({
     required this.id,
     required this.tripId,
@@ -193,13 +230,12 @@ class Expense {
     required this.amountPaise,
     required this.mode,
     required this.payee,
+    required this.payeeUserId,
     required this.shares,
     required this.placeName,
     required this.at,
-    required this.paypalPayoutId,
   });
 
-  /// True when every person's part is the same (give or take a paisa).
   bool get isEvenSplit {
     if (shares.isEmpty) return true;
     final amounts = shares.map((s) => s.amountPaise);
@@ -217,15 +253,13 @@ class Expense {
         amountPaise: _int(j['amount_paise']),
         mode: _str(j['mode']),
         payee: _str(j['payee']),
+        payeeUserId: _str(j['payee_user_id']),
         shares: _list(j['shares'], Share.fromJson),
         placeName: _str(j['place_name']),
         at: parseIst(j['at'] as String?),
-        paypalPayoutId: _str(j['paypal_payout_id']),
       );
 }
 
-/// What a payment would do to one category's budget. Comes back from
-/// budget-check and inside a budget_warning error.
 class BudgetCheck {
   final String category;
   final int limitPaise;
@@ -235,7 +269,6 @@ class BudgetCheck {
   final int percentBefore;
   final int percentAfter;
   final bool over100;
-  final bool warn;
   BudgetCheck({
     required this.category,
     required this.limitPaise,
@@ -245,7 +278,6 @@ class BudgetCheck {
     required this.percentBefore,
     required this.percentAfter,
     required this.over100,
-    required this.warn,
   });
 
   int get thisPaymentPaise => afterPaise - usedPaise;
@@ -259,7 +291,6 @@ class BudgetCheck {
         percentBefore: _int(j['percent_before']),
         percentAfter: _int(j['percent_after']),
         over100: j['over_100'] == true,
-        warn: j['warn'] == true,
       );
 }
 
@@ -269,13 +300,7 @@ class BudgetLine {
   final int usedPaise;
   final int percent;
   final bool aheadOfPace;
-  BudgetLine({
-    required this.category,
-    required this.limitPaise,
-    required this.usedPaise,
-    required this.percent,
-    required this.aheadOfPace,
-  });
+  BudgetLine({required this.category, required this.limitPaise, required this.usedPaise, required this.percent, required this.aheadOfPace});
 
   factory BudgetLine.fromJson(Map<String, dynamic> j) => BudgetLine(
         category: _str(j['category']),
@@ -293,14 +318,7 @@ class Budgets {
   final int day;
   final int days;
   final List<BudgetLine> lines;
-  Budgets({
-    required this.limitPaise,
-    required this.usedPaise,
-    required this.percent,
-    required this.day,
-    required this.days,
-    required this.lines,
-  });
+  Budgets({required this.limitPaise, required this.usedPaise, required this.percent, required this.day, required this.days, required this.lines});
 
   factory Budgets.fromJson(Map<String, dynamic> j) => Budgets(
         limitPaise: _int(j['limit_paise']),
@@ -312,7 +330,6 @@ class Budgets {
       );
 }
 
-/// One row of a breakdown: a category, a time of day, a place or a person.
 class Breakdown {
   final String key;
   final int amountPaise;
@@ -329,8 +346,6 @@ class Insights {
   final int leftPaise;
   final int day;
   final int days;
-  final int dailyPacePaise;
-  final int forecastLeftPaise;
   final List<Breakdown> byCategory;
   final List<Breakdown> byTimeOfDay;
   final List<Breakdown> byPlace;
@@ -342,8 +357,6 @@ class Insights {
     required this.leftPaise,
     required this.day,
     required this.days,
-    required this.dailyPacePaise,
-    required this.forecastLeftPaise,
     required this.byCategory,
     required this.byTimeOfDay,
     required this.byPlace,
@@ -357,8 +370,6 @@ class Insights {
         leftPaise: _int(j['left_paise']),
         day: _int(j['day']),
         days: _int(j['days']),
-        dailyPacePaise: _int(j['daily_pace_paise']),
-        forecastLeftPaise: _int(j['forecast_left_paise']),
         byCategory: _list(j['by_category'], Breakdown.fromJson),
         byTimeOfDay: _list(j['by_time_of_day'], Breakdown.fromJson),
         byPlace: _list(j['by_place'], Breakdown.fromJson),
@@ -367,21 +378,17 @@ class Insights {
       );
 }
 
+/// A PayPal checkout: adding money to your balance (no trip) or to a trip.
 class Deposit {
   final String id;
   final String tripId;
   final int amountPaise;
   final String paypalOrderId;
   final String approveUrl;
-  final String status; // created, captured
-  Deposit({
-    required this.id,
-    required this.tripId,
-    required this.amountPaise,
-    required this.paypalOrderId,
-    required this.approveUrl,
-    required this.status,
-  });
+  final String status; // created, capturing, captured
+  Deposit({required this.id, required this.tripId, required this.amountPaise, required this.paypalOrderId, required this.approveUrl, required this.status});
+
+  bool get isCaptured => status == 'captured';
 
   factory Deposit.fromJson(Map<String, dynamic> j) => Deposit(
         id: _str(j['id']),
@@ -397,43 +404,30 @@ class PlanItem {
   final String userId;
   final String name;
   final int amountPaise;
-  final String channel; // in_app, paypal_request, already_paid
+  final String channel; // request, organiser, already_paid
   PlanItem({required this.userId, required this.name, required this.amountPaise, required this.channel});
 
-  factory PlanItem.fromJson(Map<String, dynamic> j) => PlanItem(
-        userId: _str(j['user_id']),
-        name: _str(j['name']),
-        amountPaise: _int(j['amount_paise']),
-        channel: _str(j['channel']),
-      );
+  factory PlanItem.fromJson(Map<String, dynamic> j) =>
+      PlanItem(userId: _str(j['user_id']), name: _str(j['name']), amountPaise: _int(j['amount_paise']), channel: _str(j['channel']));
 }
 
 class Plan {
   final String id;
-  final String tripId;
   final String instruction;
   final int perPersonPaise;
   final DateTime due;
   final List<PlanItem> items;
   final int totalPaise;
-  final String status; // draft, confirmed
-  Plan({
-    required this.id,
-    required this.tripId,
-    required this.instruction,
-    required this.perPersonPaise,
-    required this.due,
-    required this.items,
-    required this.totalPaise,
-    required this.status,
-  });
+  final String status;
+  Plan({required this.id, required this.instruction, required this.perPersonPaise, required this.due, required this.items, required this.totalPaise, required this.status});
 
-  /// How many PayPal requests confirming this plan would send.
-  int get requestCount => items.where((i) => i.channel == 'paypal_request').length;
+  int get requestCount => items.where((i) => i.channel == 'request').length;
+
+  Plan withStatus(String s) =>
+      Plan(id: id, instruction: instruction, perPersonPaise: perPersonPaise, due: due, items: items, totalPaise: totalPaise, status: s);
 
   factory Plan.fromJson(Map<String, dynamic> j) => Plan(
         id: _str(j['id']),
-        tripId: _str(j['trip_id']),
         instruction: _str(j['instruction']),
         perPersonPaise: _int(j['per_person_paise']),
         due: parseIst(j['due'] as String?),
@@ -443,58 +437,93 @@ class Plan {
       );
 }
 
+/// A trip deposit the organiser asked a member for.
 class DepositRequest {
   final String id;
   final String tripId;
-  final String userId;
+  final String tripName;
+  final Person user;
   final int amountPaise;
   final DateTime due;
-  final String paypalInvoiceId;
-  final String payUrl;
-  final String status; // sent, paid
+  final String status; // open, paid, cancelled
   final int remindersSent;
-  final List<DateTime> reminders;
   final DateTime? paidAt;
+  final String paidVia;
   DepositRequest({
     required this.id,
     required this.tripId,
-    required this.userId,
+    required this.tripName,
+    required this.user,
     required this.amountPaise,
     required this.due,
-    required this.paypalInvoiceId,
-    required this.payUrl,
     required this.status,
     required this.remindersSent,
-    required this.reminders,
     required this.paidAt,
+    required this.paidVia,
   });
 
-  bool get isPaid => status == 'paid';
+  bool get isOpen => status == 'open';
 
   factory DepositRequest.fromJson(Map<String, dynamic> j) => DepositRequest(
         id: _str(j['id']),
         tripId: _str(j['trip_id']),
-        userId: _str(j['user_id']),
+        tripName: _str(j['trip_name']),
+        user: Person.fromJson(_map(j['user'])),
         amountPaise: _int(j['amount_paise']),
         due: parseIst(j['due'] as String?),
-        paypalInvoiceId: _str(j['paypal_invoice_id']),
-        payUrl: _str(j['pay_url']),
         status: _str(j['status']),
         remindersSent: _int(j['reminders_sent']),
-        reminders: ((j['reminders'] as List?) ?? const []).map((e) => parseIst(e as String)).toList(),
         paidAt: j['paid_at'] == null ? null : parseIst(j['paid_at'] as String),
+        paidVia: _str(j['paid_via']),
+      );
+}
+
+/// One person asking another for money.
+class MoneyRequest {
+  final String id;
+  final Person requester;
+  final Person payer;
+  final int amountPaise;
+  final String note;
+  final String status; // open, paid, declined, cancelled
+  final String direction; // incoming (you pay) or outgoing
+  final DateTime createdAt;
+  MoneyRequest({
+    required this.id,
+    required this.requester,
+    required this.payer,
+    required this.amountPaise,
+    required this.note,
+    required this.status,
+    required this.direction,
+    required this.createdAt,
+  });
+
+  bool get isOpen => status == 'open';
+  bool get isIncoming => direction == 'incoming';
+  Person get other => isIncoming ? requester : payer;
+
+  factory MoneyRequest.fromJson(Map<String, dynamic> j) => MoneyRequest(
+        id: _str(j['id']),
+        requester: Person.fromJson(_map(j['requester'])),
+        payer: Person.fromJson(_map(j['payer'])),
+        amountPaise: _int(j['amount_paise']),
+        note: _str(j['note']),
+        status: _str(j['status']),
+        direction: _str(j['direction']),
+        createdAt: parseIst(j['created_at'] as String?),
       );
 }
 
 class SettleLine {
-  final User user;
+  final Person user;
   final int depositedPaise;
   final int usedPaise;
   final int refundPaise;
   SettleLine({required this.user, required this.depositedPaise, required this.usedPaise, required this.refundPaise});
 
   factory SettleLine.fromJson(Map<String, dynamic> j) => SettleLine(
-        user: User.fromJson(j['user'] as Map<String, dynamic>),
+        user: Person.fromJson(_map(j['user'])),
         depositedPaise: _int(j['deposited_paise']),
         usedPaise: _int(j['used_paise']),
         refundPaise: _int(j['refund_paise']),
@@ -502,40 +531,29 @@ class SettleLine {
 }
 
 class Settlement {
-  final String tripId;
   final String status;
   final int depositedPaise;
   final int spentPaise;
   final int refundPaise;
   final List<SettleLine> lines;
-  final String paypalPayoutId;
-  Settlement({
-    required this.tripId,
-    required this.status,
-    required this.depositedPaise,
-    required this.spentPaise,
-    required this.refundPaise,
-    required this.lines,
-    required this.paypalPayoutId,
-  });
+  Settlement({required this.status, required this.depositedPaise, required this.spentPaise, required this.refundPaise, required this.lines});
 
   factory Settlement.fromJson(Map<String, dynamic> j) => Settlement(
-        tripId: _str(j['trip_id']),
         status: _str(j['status']),
         depositedPaise: _int(j['deposited_paise']),
         spentPaise: _int(j['spent_paise']),
         refundPaise: _int(j['refund_paise']),
         lines: _list(j['lines'], SettleLine.fromJson),
-        paypalPayoutId: _str(j['paypal_payout_id']),
       );
 }
 
 class HistoryItem {
-  final String kind; // payment, deposit, refund
+  final String kind; // payment, received, deposit, topup, refund
   final String wallet; // trip, personal
   final String tripId;
   final String tripName;
   final String title;
+  final String subtitle;
   final String category;
   final int amountPaise;
   final int yourPartPaise;
@@ -547,6 +565,7 @@ class HistoryItem {
     required this.tripId,
     required this.tripName,
     required this.title,
+    required this.subtitle,
     required this.category,
     required this.amountPaise,
     required this.yourPartPaise,
@@ -556,12 +575,16 @@ class HistoryItem {
 
   bool get isTrip => wallet == 'trip';
 
+  /// Money that came into your balance.
+  bool get isIncoming => kind == 'received' || kind == 'topup' || kind == 'refund';
+
   factory HistoryItem.fromJson(Map<String, dynamic> j) => HistoryItem(
         kind: _str(j['kind']),
         wallet: _str(j['wallet']),
         tripId: _str(j['trip_id']),
         tripName: _str(j['trip_name']),
         title: _str(j['title']),
+        subtitle: _str(j['subtitle']),
         category: _str(j['category']),
         amountPaise: _int(j['amount_paise']),
         yourPartPaise: _int(j['your_part_paise']),
@@ -573,18 +596,11 @@ class HistoryItem {
 class AlertItem {
   final String id;
   final String tripId;
-  final String kind; // budget, deposit, payment, share, assistant
+  final String kind; // budget, deposit, payment, share, assistant, trip, money, request
   final String title;
   final String body;
   final DateTime at;
-  AlertItem({
-    required this.id,
-    required this.tripId,
-    required this.kind,
-    required this.title,
-    required this.body,
-    required this.at,
-  });
+  AlertItem({required this.id, required this.tripId, required this.kind, required this.title, required this.body, required this.at});
 
   factory AlertItem.fromJson(Map<String, dynamic> j) => AlertItem(
         id: _str(j['id']),

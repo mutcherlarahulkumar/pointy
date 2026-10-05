@@ -5,12 +5,15 @@ import '../../dates.dart';
 import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/tile_icon.dart';
+import '../history/history.dart';
+import '../money/requests.dart';
 import '../trips/trip_shell.dart';
 
 /// Alerts from the bell, grouped by day. Each row opens the screen that
-/// deals with it.
+/// deals with it. Opening this screen clears the unread badge.
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
 
@@ -21,18 +24,27 @@ class AlertsScreen extends StatefulWidget {
 class _AlertsScreenState extends State<AlertsScreen> {
   late Future<List<AlertItem>> _alerts = api.alerts();
 
+  @override
+  void initState() {
+    super.initState();
+    api.markAlertsSeen().catchError((_) {});
+  }
+
   void _open(AlertItem a) {
-    if (a.tripId.isEmpty) return;
-    // Budget alerts open the Budget tab, deposit and assistant alerts the
-    // Deposits tab, low-share alerts the Wallet tab (to add money), and
-    // payments the Spending tab.
-    final tab = switch (a.kind) {
-      'budget' => 3,
-      'deposit' || 'assistant' => 1,
-      'share' => 0,
-      _ => 2,
+    final Widget? screen = switch (a.kind) {
+      'request' => const RequestsScreen(),
+      'money' => const HistoryScreen(standalone: true),
+      'budget' when a.tripId.isNotEmpty => TripShell(tripId: a.tripId, initialTab: 3),
+      'deposit' || 'assistant' when a.tripId.isNotEmpty => TripShell(tripId: a.tripId, initialTab: 1),
+      'payment' when a.tripId.isNotEmpty => TripShell(tripId: a.tripId, initialTab: 2),
+      _ when a.tripId.isNotEmpty => TripShell(tripId: a.tripId),
+      _ => null,
     };
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => TripShell(tripId: a.tripId, initialTab: tab)));
+    if (screen is TripShell) {
+      Navigator.of(context).push(tripRoute(screen.tripId, initialTab: screen.initialTab));
+    } else if (screen != null) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    }
   }
 
   @override
@@ -43,51 +55,46 @@ class _AlertsScreenState extends State<AlertsScreen> {
         future: _alerts,
         onRetry: () => setState(() => _alerts = api.alerts()),
         builder: (context, alerts) {
-          if (alerts.isEmpty) return const ErrorView(message: 'No alerts yet.');
-          final sorted = [...alerts]..sort((a, b) => b.at.compareTo(a.at));
+          if (alerts.isEmpty) {
+            return const EmptyState(icon: Icons.notifications_none_rounded, title: 'All quiet', body: 'Payments, requests and budget warnings show up here.');
+          }
           final rows = <Widget>[];
           DateTime? day;
-          for (final a in sorted) {
+          for (final a in alerts) {
             if (day == null || !sameDay(day, a.at)) {
               day = a.at;
               rows.add(SectionTitle(formatWeekday(a.at)));
             }
+            final (icon, bg, fg) = _style(a.kind);
             rows.add(Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Card(
                 child: ListTile(
-                  leading: TileIcon(_icon(a.kind), background: _bg(a.kind), color: _fg(a.kind)),
+                  leading: TileIcon(icon, background: bg, color: fg),
                   title: Text(a.title, style: AppText.body(weight: FontWeight.w600)),
                   subtitle: Text('${a.body} · ${formatTime(a.at)}', style: AppText.detail()),
-                  trailing: a.tripId.isEmpty ? null : const Icon(Icons.chevron_right),
                   onTap: () => _open(a),
                 ),
               ),
             ));
           }
-          return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), children: rows);
+          return RefreshIndicator(
+            onRefresh: () async => setState(() => _alerts = api.alerts()),
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), children: rows),
+          );
         },
       ),
     );
   }
 
-  IconData _icon(String kind) => switch (kind) {
-        'budget' => Icons.pie_chart_outline,
-        'deposit' => Icons.savings_outlined,
-        'share' => Icons.account_balance_wallet_outlined,
-        'assistant' => Icons.auto_awesome,
-        _ => Icons.payments_outlined,
-      };
-
-  Color _bg(String kind) => switch (kind) {
-        'budget' || 'share' => AppColors.pendingBg,
-        'assistant' => AppColors.amber100,
-        _ => AppColors.pine100,
-      };
-
-  Color _fg(String kind) => switch (kind) {
-        'budget' || 'share' => AppColors.pending,
-        'assistant' => AppColors.amber900,
-        _ => AppColors.pine700,
+  (IconData, Color, Color) _style(String kind) => switch (kind) {
+        'budget' => (Icons.pie_chart_outline, AppColors.pendingBg, AppColors.pending),
+        'share' => (Icons.account_balance_wallet_outlined, AppColors.pendingBg, AppColors.pending),
+        'request' => (Icons.call_received_rounded, AppColors.pendingBg, AppColors.pending),
+        'assistant' => (Icons.auto_awesome, AppColors.amber100, AppColors.amber900),
+        'deposit' => (Icons.savings_outlined, AppColors.pine100, AppColors.pine700),
+        'trip' => (Icons.luggage_outlined, AppColors.pine100, AppColors.pine700),
+        'money' => (Icons.payments_outlined, AppColors.personalBg, AppColors.personal),
+        _ => (Icons.receipt_outlined, AppColors.pine100, AppColors.pine700),
       };
 }

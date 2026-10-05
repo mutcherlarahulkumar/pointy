@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
@@ -15,17 +14,16 @@ class ApiException implements Exception {
   ApiException(this.status, this.code, this.message, [this.details]);
 
   @override
-  String toString() => message;
+  String toString() => message.isEmpty ? message : '${message[0].toUpperCase()}${message.substring(1)}';
 }
 
-/// Picks the server address. Pass --dart-define=API_BASE=http://... to
-/// override it; otherwise the Android emulator uses 10.0.2.2 (its name for
-/// the computer running it) and everything else uses localhost.
+/// The deployed backend. Builds can point elsewhere with
+/// --dart-define=API_BASE=https://... (CI sets it from a repository variable).
+const defaultApiBase = 'https://pointy-ceoi.onrender.com';
+
 String defaultBaseUrl() {
   const fromDefine = String.fromEnvironment('API_BASE');
-  if (fromDefine.isNotEmpty) return fromDefine;
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8080';
-  return 'https://pointy-ceoi.onrender.com';
+  return fromDefine.isNotEmpty ? fromDefine : defaultApiBase;
 }
 
 /// Makes a fresh Idempotency-Key. Make one per payment attempt and reuse it
@@ -35,20 +33,26 @@ String newIdempotencyKey() => const Uuid().v4();
 /// One class that knows every endpoint. Screens call these methods and get
 /// model objects back.
 class ApiClient {
-  ApiClient({String? baseUrl, http.Client? client, this.userId = 'u_you'})
+  ApiClient({String? baseUrl, http.Client? client})
       : baseUrl = baseUrl ?? defaultBaseUrl(),
         _http = client ?? http.Client();
 
   final String baseUrl;
   final http.Client _http;
 
-  /// Who is calling. The demo backend trusts this header.
-  String userId;
+  /// The signed-in session, or null. Set by Session.
+  String? token;
+
+  /// The signed-in person's id, filled in after sign-in.
+  String userId = '';
+
+  /// Called when the server says the session is no longer valid.
+  void Function()? onSignedOut;
 
   Future<dynamic> _send(String method, String path, {Object? body, String? idempotencyKey}) async {
     final headers = {
       'Content-Type': 'application/json',
-      'X-User-Id': userId,
+      if (token != null) 'Authorization': 'Bearer $token',
       if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
     };
     final req = http.Request(method, Uri.parse('$baseUrl$path'))..headers.addAll(headers);
@@ -56,94 +60,118 @@ class ApiClient {
 
     final http.Response res;
     try {
-      res = await http.Response.fromStream(await _http.send(req));
+      // The free Render plan sleeps when idle and takes up to a minute to wake.
+      res = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 75)));
     } catch (_) {
-      throw ApiException(0, 'offline', 'Could not reach the Pointy server at $baseUrl');
+      throw ApiException(0, 'offline', 'Could not reach Pointy. Check your internet and try again.');
     }
     final text = utf8.decode(res.bodyBytes);
-    final decoded = text.isEmpty ? null : jsonDecode(text);
+    dynamic decoded;
+    try {
+      decoded = text.isEmpty ? null : jsonDecode(text);
+    } catch (_) {
+      decoded = null; // an HTML error page from a proxy
+    }
     if (res.statusCode >= 400) {
       final err = (decoded is Map ? decoded['error'] : null) as Map<String, dynamic>?;
-      throw ApiException(
+      final e = ApiException(
         res.statusCode,
         (err?['code'] as String?) ?? 'error',
-        (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode})',
+        (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode}). Please try again.',
         err?['details'] as Map<String, dynamic>?,
       );
+      if (e.code == 'signed_out') onSignedOut?.call();
+      throw e;
     }
     return decoded;
   }
 
   Future<Map<String, dynamic>> _obj(String method, String path, {Object? body, String? key}) async =>
-      (await _send(method, path, body: body, idempotencyKey: key)) as Map<String, dynamic>;
+      ((await _send(method, path, body: body, idempotencyKey: key)) as Map<String, dynamic>?) ?? {};
 
-  Future<List<Map<String, dynamic>>> _arr(String path) async =>
-      (((await _send('GET', path)) as List?) ?? const []).cast<Map<String, dynamic>>();
+  Future<List<Map<String, dynamic>>> _arr(String method, String path, {Object? body, String? key}) async =>
+      (((await _send(method, path, body: body, idempotencyKey: key)) as List?) ?? const []).cast<Map<String, dynamic>>();
 
-  // Home
+  // Sign in
+  Future<PhoneCheck> checkPhone(String phone) async =>
+      PhoneCheck.fromJson(await _obj('POST', '/api/auth/check-phone', body: {'phone': phone}));
+  Future<AuthResult> register(String name, String phone, String pin) async =>
+      AuthResult.fromJson(await _obj('POST', '/api/auth/register', body: {'name': name, 'phone': phone, 'pin': pin}));
+  Future<AuthResult> login(String phone, String pin) async =>
+      AuthResult.fromJson(await _obj('POST', '/api/auth/login', body: {'phone': phone, 'pin': pin}));
+  Future<void> logout() async => _send('POST', '/api/auth/logout');
+
+  // You and people
   Future<Me> me() async => Me.fromJson(await _obj('GET', '/api/me'));
+  Future<List<Person>> contacts() async => (await _arr('GET', '/api/contacts')).map(Person.fromJson).toList();
+  Future<Person> lookupPhone(String phone) async =>
+      Person.fromJson(await _obj('GET', '/api/users/lookup?phone=${Uri.encodeQueryComponent(phone)}'));
+  Future<Person> person(String id) async => Person.fromJson(await _obj('GET', '/api/users/${Uri.encodeComponent(id)}'));
 
-  Future<Suggestion> suggest({String placeType = '', String placeName = ''}) async => Suggestion.fromJson(
-      await _obj('POST', '/api/suggestions', body: {'place_type': placeType, 'place_name': placeName}));
-
-  Future<Expense> payPersonal(Map<String, dynamic> body, {required String key}) async =>
+  // Your balance
+  Future<Deposit> startTopUp(int amountPaise, {required String key}) async =>
+      Deposit.fromJson(await _obj('POST', '/api/topups', body: {'amount_paise': amountPaise}, key: key));
+  Future<Deposit> deposit(String orderId) async => Deposit.fromJson(await _obj('GET', '/api/deposits/$orderId'));
+  Future<Deposit> captureDeposit(String orderId, {required String key}) async =>
+      Deposit.fromJson(await _obj('POST', '/api/deposits/$orderId/capture', key: key));
+  Future<Suggestion> suggest({String placeType = ''}) async =>
+      Suggestion.fromJson(await _obj('POST', '/api/suggestions', body: {'place_type': placeType}));
+  Future<Expense> payPerson(Map<String, dynamic> body, {required String key}) async =>
       Expense.fromJson(await _obj('POST', '/api/payments/personal', body: body, key: key));
 
+  // Requests between people
+  Future<List<MoneyRequest>> moneyRequests() async => (await _arr('GET', '/api/money-requests')).map(MoneyRequest.fromJson).toList();
+  Future<MoneyRequest> requestMoney(String payerId, int amountPaise, String note, {required String key}) async =>
+      MoneyRequest.fromJson(await _obj('POST', '/api/money-requests',
+          body: {'payer_id': payerId, 'amount_paise': amountPaise, 'note': note}, key: key));
+  Future<MoneyRequest> payMoneyRequest(String id, {required String key}) async =>
+      MoneyRequest.fromJson(await _obj('POST', '/api/money-requests/$id/pay', key: key));
+  Future<MoneyRequest> declineMoneyRequest(String id) async =>
+      MoneyRequest.fromJson(await _obj('POST', '/api/money-requests/$id/decline'));
+  Future<List<MoneyRequest>> splitBill(Map<String, dynamic> body, {required String key}) async =>
+      ((await _obj('POST', '/api/splits', body: body, key: key))['requests'] as List? ?? const [])
+          .map((e) => MoneyRequest.fromJson(e as Map<String, dynamic>))
+          .toList();
+
   // History and alerts
-  Future<List<HistoryItem>> history() async => (await _arr('/api/history')).map(HistoryItem.fromJson).toList();
-  Future<List<AlertItem>> alerts() async => (await _arr('/api/alerts')).map(AlertItem.fromJson).toList();
+  Future<List<HistoryItem>> history() async => (await _arr('GET', '/api/history')).map(HistoryItem.fromJson).toList();
+  Future<List<AlertItem>> alerts() async => (await _arr('GET', '/api/alerts')).map(AlertItem.fromJson).toList();
+  Future<void> markAlertsSeen() async => _send('POST', '/api/alerts/seen');
 
   // Trips
-  Future<List<Trip>> trips() async => (await _arr('/api/trips')).map(Trip.fromJson).toList();
+  Future<List<Trip>> trips() async => (await _arr('GET', '/api/trips')).map(Trip.fromJson).toList();
   Future<Trip> trip(String id) async => Trip.fromJson(await _obj('GET', '/api/trips/$id'));
   Future<Trip> createTrip(Map<String, dynamic> body, {required String key}) async =>
       Trip.fromJson(await _obj('POST', '/api/trips', body: body, key: key));
-
-  // Deposits
-  Future<Deposit> startDeposit(String tripId, int amountPaise, {required String key}) async => Deposit.fromJson(
-      await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise}, key: key));
-  Future<Deposit> captureDeposit(String orderId, {required String key}) async =>
-      Deposit.fromJson(await _obj('POST', '/api/deposits/$orderId/capture', key: key));
-
-  // Pay and split
+  Future<Trip> addMembers(String tripId, List<String> ids) async =>
+      Trip.fromJson(await _obj('POST', '/api/trips/$tripId/members', body: {'members': ids}));
+  Future<Deposit> startTripDeposit(String tripId, int amountPaise, {required String key}) async => Deposit.fromJson(
+      await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise, 'source': 'paypal'}, key: key));
+  Future<Trip> depositFromBalance(String tripId, int amountPaise, {required String key}) async => Trip.fromJson(
+      await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise, 'source': 'balance'}, key: key));
   Future<List<Expense>> expenses(String tripId) async =>
-      (await _arr('/api/trips/$tripId/expenses')).map(Expense.fromJson).toList();
+      (await _arr('GET', '/api/trips/$tripId/expenses')).map(Expense.fromJson).toList();
   Future<Expense> addExpense(String tripId, Map<String, dynamic> body, {required String key}) async =>
       Expense.fromJson(await _obj('POST', '/api/trips/$tripId/expenses', body: body, key: key));
-
-  // Budgets
   Future<Budgets> budgets(String tripId) async => Budgets.fromJson(await _obj('GET', '/api/trips/$tripId/budgets'));
   Future<Budgets> setBudgets(String tripId, Map<String, int> paiseByCategory) async =>
       Budgets.fromJson(await _obj('PUT', '/api/trips/$tripId/budgets', body: paiseByCategory));
-  Future<BudgetCheck> budgetCheck(String tripId, String category, int amountPaise) async =>
-      BudgetCheck.fromJson(await _obj('POST', '/api/trips/$tripId/budget-check',
-          body: {'category': category, 'amount_paise': amountPaise}));
-
-  // Insights
   Future<Insights> insights(String tripId) async => Insights.fromJson(await _obj('GET', '/api/trips/$tripId/insights'));
-
-  // Settle up
-  Future<Settlement> settlement(String tripId) async =>
-      Settlement.fromJson(await _obj('GET', '/api/trips/$tripId/settlement'));
+  Future<Settlement> settlement(String tripId) async => Settlement.fromJson(await _obj('GET', '/api/trips/$tripId/settlement'));
   Future<Settlement> settle(String tripId, {required String key}) async =>
       Settlement.fromJson(await _obj('POST', '/api/trips/$tripId/settle', key: key));
 
-  // Assistant
-  Future<Plan> draftPlan(String tripId, String instruction) async => Plan.fromJson(
-      await _obj('POST', '/api/trips/$tripId/assistant/plan', body: {'instruction': instruction}));
-  Future<List<DepositRequest>> confirmPlan(String tripId, String planId, {required String key}) async =>
-      (((await _send('POST', '/api/trips/$tripId/assistant/plans/$planId/confirm', idempotencyKey: key)) as List?) ??
-              const [])
-          .map((e) => DepositRequest.fromJson(e as Map<String, dynamic>))
-          .toList();
+  // Assistant and deposit requests
+  Future<Plan> draftPlan(String tripId, String instruction) async =>
+      Plan.fromJson(await _obj('POST', '/api/trips/$tripId/assistant/plan', body: {'instruction': instruction}));
+  Future<int> confirmPlan(String tripId, String planId, {required String key}) async =>
+      (await _arr('POST', '/api/trips/$tripId/assistant/plans/$planId/confirm', key: key)).length;
   Future<List<DepositRequest>> requests(String tripId) async =>
-      (await _arr('/api/trips/$tripId/requests')).map(DepositRequest.fromJson).toList();
+      (await _arr('GET', '/api/trips/$tripId/requests')).map(DepositRequest.fromJson).toList();
   Future<DepositRequest> remind(String requestId, {required String key}) async =>
       DepositRequest.fromJson(await _obj('POST', '/api/requests/$requestId/remind', key: key));
-
-  /// Mock mode only: pretends PayPal told us the request was paid.
-  Future<DepositRequest> demoMarkPaid(String requestId) async =>
-      DepositRequest.fromJson(await _obj('POST', '/api/demo/requests/$requestId/paid'));
+  Future<DepositRequest> payDepositRequest(String requestId, {required String key}) async =>
+      DepositRequest.fromJson(await _obj('POST', '/api/requests/$requestId/pay', key: key));
 }
 
 /// The one client the app uses. Tests replace it with one that has a fake

@@ -23,7 +23,11 @@ class AppColors {
   static const pendingBg = Color(0xFFFFE8CC);
   static const error = Color(0xFFB3261E);
   static const errorBg = Color(0xFFFBE4E1);
+  static const personalDark = Color(0xFF22306A);
 }
+
+/// The soft shadow used under raised cards.
+const cardShadow = [BoxShadow(color: Color(0x14000000), blurRadius: 24, offset: Offset(0, 8))];
 
 /// Text styles. Bricolage Grotesque for balances and titles, Instrument Sans
 /// for everything else.
@@ -43,6 +47,7 @@ class AppText {
 
   static TextStyle balance({Color color = AppColors.ink}) => _display(40, 48, color);
   static TextStyle title({Color color = AppColors.ink}) => _display(28, 32, color);
+  static TextStyle hero({Color color = AppColors.ink}) => _display(34, 40, color);
   static TextStyle heading({Color color = AppColors.ink}) => _sans(17, 22, FontWeight.w600, color);
   static TextStyle body({Color color = AppColors.ink, FontWeight weight = FontWeight.w400}) =>
       _sans(15, 20, weight, color);

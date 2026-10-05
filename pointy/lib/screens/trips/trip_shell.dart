@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
-import '../../dates.dart';
 import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
@@ -74,9 +73,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final when = trip.day > 0 && trip.day <= trip.days
-        ? 'Day ${trip.day} of ${trip.days}'
-        : '${formatDay(trip.start)} – ${formatDay(trip.end)}';
+    final when = trip.when;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Row(
@@ -86,7 +83,7 @@ class _Header extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(trip.name, style: AppText.title()),
-                Text('${trip.place} · $when · ${trip.members.length} people', style: AppText.detail()),
+                Text([if (trip.place.isNotEmpty) trip.place, when, '${trip.members.length} people'].join(' · '), style: AppText.detail()),
               ],
             ),
           ),
@@ -96,3 +93,10 @@ class _Header extends StatelessWidget {
     );
   }
 }
+
+/// Opens a trip. The route is named so flows started inside the trip can
+/// return to it.
+Route<void> tripRoute(String tripId, {int initialTab = 0}) => MaterialPageRoute(
+      settings: const RouteSettings(name: 'trip'),
+      builder: (_) => TripShell(tripId: tripId, initialTab: initialTab),
+    );

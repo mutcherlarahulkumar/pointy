@@ -33,7 +33,7 @@ class _SettleScreenState extends State<SettleScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Send refunds and close the trip?'),
         content: Text('${formatPaise(s.refundPaise)} goes back to ${s.lines.where((l) => l.refundPaise > 0).length} '
-            'people through PayPal. Nobody can pay from this wallet afterwards.'),
+            'people\'s Pointy balances. Nobody can pay from this wallet afterwards.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send refunds')),
@@ -100,7 +100,7 @@ class _SettleScreenState extends State<SettleScreen> {
                 Row(children: [
                   const Tag('Refunds sent', kind: TagKind.trip),
                   const SizedBox(width: 8),
-                  if (s.paypalPayoutId.isNotEmpty) Text('PayPal ${s.paypalPayoutId}', style: AppText.small()),
+                  Text('Into everyone\'s Pointy balance', style: AppText.small()),
                 ]),
               ] else if (organiser)
                 FilledButton(
@@ -134,7 +134,7 @@ String recap(Trip t, Settlement s) {
   final top = [...s.lines]..sort((a, b) => b.refundPaise.compareTo(a.refundPaise));
   var text = '$people people put in ${formatPaise(s.depositedPaise)} and spent ${formatPaise(s.spentPaise)}, '
       'about ${formatPaise(each)} each. ${formatPaise(s.refundPaise)} '
-      '${s.status == 'open' ? 'is left to send back' : 'was sent back'}.';
+      '${s.status == 'open' ? 'is left to send back' : 'went back to balances'}.';
   // Name who gets the most back only when one person clearly does.
   if (top.length > 1 && top.first.refundPaise > top[1].refundPaise) {
     final who = top.first.user.name;

@@ -291,7 +291,7 @@ func (s *Service) Suggest(userID string, in SuggestInput) Suggestion {
 		out.Reasons = append(out.Reasons, "This kind of shop is usually just for you")
 		out.Title = "This looks personal. Pay from your own balance."
 	default:
-		out.Title = "Pay from your own balance."
+		out.Title = "Paying a friend? It is instant from your Pointy balance."
 	}
 	return out
 }
