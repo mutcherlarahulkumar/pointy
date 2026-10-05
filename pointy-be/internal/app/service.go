@@ -65,6 +65,7 @@ type Service struct {
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
+	shop        Shopper                  // optional product search (Channel3)
 	aiSummaries map[string]cachedSummary // trip id -> last AI summary
 }
 

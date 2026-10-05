@@ -181,6 +181,21 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 	authed("DELETE /api/assistant/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]bool{"ok": true}, svc.ClearChat(userID(r))
 	})
+	// ---- shopping (Channel3): find things to buy; Pointy never buys them
+	authed("POST /api/shop/search", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Query    string    `json:"query"`
+			MaxPaise app.Paise `json:"max_paise"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		items, err := svc.Shop(r.Context(), in.Query, in.MaxPaise)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"query": in.Query, "items": items}, nil
+	})
 	authed("POST /api/quick-pay", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
 			Text string `json:"text"`

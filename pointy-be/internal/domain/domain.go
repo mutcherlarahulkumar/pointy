@@ -249,13 +249,15 @@ type ChatMessage struct {
 
 // ChatAction is a button under an assistant reply.
 type ChatAction struct {
-	Type   string      `json:"type"` // pay, request, open
+	Type   string      `json:"type"` // pay, request, open, shop
 	Label  string      `json:"label"`
 	Person *PublicUser `json:"person,omitempty"`
 	Amount Paise       `json:"amount_paise,omitempty"`
 	Note   string      `json:"note,omitempty"`
 	Screen string      `json:"screen,omitempty"` // add_money, requests, trips, history, insights, split, trip
 	TripID string      `json:"trip_id,omitempty"`
+	Query  string      `json:"query,omitempty"` // shop: what was searched
+	Items  []ShopItem  `json:"items,omitempty"` // shop: the products found
 }
 
 // ChatCleared deletes a person's conversation.
@@ -277,4 +279,19 @@ type Payout struct {
 	Error       string     `json:"error,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	DoneAt      *time.Time `json:"done_at,omitempty"`
+}
+
+// ShopItem is a product found for the person (through Channel3), with the
+// best in-stock offer. Pointy never buys it: the person opens the shop's
+// page, and can then split the cost or add it to a trip.
+type ShopItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Brand     string `json:"brand,omitempty"`
+	ImageURL  string `json:"image_url,omitempty"`
+	Merchant  string `json:"merchant"`    // "amazon.com"
+	BuyURL    string `json:"buy_url"`     // the shop's page (affiliate-tracked by Channel3)
+	Price     Paise  `json:"price_paise"` // in rupees, converted at the demo rate
+	WasPrice  Paise  `json:"was_price_paise,omitempty"`
+	ListPrice string `json:"list_price"` // as the shop shows it: "$19.99"
 }

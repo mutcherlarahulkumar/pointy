@@ -99,18 +99,23 @@ class _Draft {
 
 /// Step 1: how much and what for.
 class ExpenseAmountScreen extends StatefulWidget {
-  const ExpenseAmountScreen({super.key, required this.trip});
+  const ExpenseAmountScreen({super.key, required this.trip, this.amountPaise, this.what, this.payee});
 
   final Trip trip;
+
+  /// Filled in when coming from elsewhere (a product found by Pointy AI).
+  final int? amountPaise;
+  final String? what;
+  final String? payee;
 
   @override
   State<ExpenseAmountScreen> createState() => _ExpenseAmountScreenState();
 }
 
 class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
-  late final _d = _Draft(widget.trip);
-  final _amount = TextEditingController();
-  final _what = TextEditingController();
+  late final _d = _Draft(widget.trip)..payee = widget.payee ?? '';
+  late final _amount = TextEditingController(text: widget.amountPaise == null ? '' : paiseToInput(widget.amountPaise!));
+  late final _what = TextEditingController(text: widget.what ?? '');
   bool _picked = false; // the person chose a category themselves
   ScannedReceipt? _scanned;
   bool _scanning = false;

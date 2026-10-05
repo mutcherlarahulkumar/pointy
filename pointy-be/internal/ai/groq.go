@@ -207,6 +207,7 @@ Keep replies short: one to three sentences, friendly, plain English, no markdown
 You can suggest ONE action, which only opens a screen for the person to check and confirm; you never move money yourself, so never say money was sent or paid.
 - action "pay" or "request": when they want to pay or ask someone for money. person must be a name from facts.people (as written there) or a 10-digit Indian mobile number; amount_rupees is plain digits ("200", 2k = "2000"); note is what it is for, or "".
 - action "open": to take them to a screen: add_money (top up the balance), requests (money asked of them or by them), trips, history, insights, split (split a bill), or trip (a specific trip; put its name in trip).
+- action "shop": when they want to find or buy a product (only if facts.shopping_available is true). shop_query is a short product search in plain English ("sunscreen spf 50", "waterproof phone pouch"); amount_rupees is their budget per item if they gave one. The app shows matching products from online shops with prices; say you found some options, never that you bought anything.
 - action "none" otherwise. Leave unused fields as "".
 Answer with JSON only.`
 
@@ -220,13 +221,14 @@ func (g *Groq) Chat(ctx context.Context, in ChatInput) (ChatReply, error) {
 	err = g.complete(ctx, g.model, chatSystem, string(data), "chat_reply",
 		obj(map[string]any{
 			"reply":         str,
-			"action":        map[string]any{"type": "string", "enum": []string{"none", "pay", "request", "open"}},
+			"action":        map[string]any{"type": "string", "enum": []string{"none", "pay", "request", "open", "shop"}},
 			"person":        str,
 			"amount_rupees": str,
 			"note":          str,
 			"screen":        map[string]any{"type": "string", "enum": []string{"", "add_money", "requests", "trips", "history", "insights", "split", "trip"}},
 			"trip":          str,
-		}, "reply", "action", "person", "amount_rupees", "note", "screen", "trip"), &out)
+			"shop_query":    str,
+		}, "reply", "action", "person", "amount_rupees", "note", "screen", "trip", "shop_query"), &out)
 	return out, err
 }
 
