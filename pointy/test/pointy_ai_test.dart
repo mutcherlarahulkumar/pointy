@@ -77,4 +77,32 @@ void main() {
     expect(sent.last.method, 'DELETE');
     expect(find.text('Ask me about your money'), findsOneWidget);
   });
+
+  testWidgets('shopping picks show as cards, and Split it opens the split form filled in', (tester) async {
+    await open(tester, turn: [
+      {'id': 'm1', 'role': 'user', 'text': 'find sunscreen under 1500'},
+      {
+        'id': 'm2', 'role': 'assistant', 'text': 'Here are some picks for sunscreen.', 'source': 'rules',
+        'action': {
+          'type': 'shop', 'label': 'Picks for sunscreen', 'query': 'sunscreen',
+          'items': [
+            {'id': 'p1', 'title': 'Sunscreen SPF 50', 'merchant': 'b.com', 'buy_url': 'https://buy/b', 'price_paise': 148750, 'list_price': r'$17.50'},
+          ],
+        },
+      },
+    ]);
+    await tester.enterText(find.byType(TextField), 'find sunscreen under 1500');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Sunscreen SPF 50'), findsOneWidget);
+    expect(find.text('₹1,487.50'), findsOneWidget);
+    expect(find.text(r'$17.50 at b.com'), findsOneWidget);
+    expect(find.text('Open shop'), findsOneWidget);
+    await tester.tap(find.text('Split it'));
+    await tester.pumpAndSettle();
+    expect(find.text('What did you pay for?'), findsOneWidget);
+    expect(find.text('Sunscreen SPF 50'), findsOneWidget); // the "What was it?" field
+    expect(find.text('1487.50'), findsOneWidget);
+  });
 }

@@ -47,12 +47,13 @@ type ChatLine struct {
 // itself: the app shows a button that opens a screen to check and confirm.
 type ChatReply struct {
 	Reply  string `json:"reply"`
-	Action string `json:"action"`        // none, pay, request, open
+	Action string `json:"action"`        // none, pay, request, open, shop
 	Person string `json:"person"`        // a name from the facts' people, a 10-digit mobile, or ""
 	Amount string `json:"amount_rupees"` // "200" or ""
 	Note   string `json:"note"`
-	Screen string `json:"screen"` // add_money, requests, trips, history, insights, split, trip, or ""
-	Trip   string `json:"trip"`   // trip name when screen is trip
+	Screen string `json:"screen"`     // add_money, requests, trips, history, insights, split, trip, or ""
+	Trip   string `json:"trip"`       // trip name when screen is trip
+	Query  string `json:"shop_query"` // what to search the shops for when action is shop
 }
 
 // QuickPayInput is what the person typed plus the names of people they

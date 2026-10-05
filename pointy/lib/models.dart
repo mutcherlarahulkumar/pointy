@@ -665,7 +665,18 @@ class ChatAction {
   final String note;
   final String screen; // add_money, requests, trips, history, insights, split, trip
   final String tripId;
-  ChatAction({required this.type, required this.label, this.person, this.amountPaise = 0, this.note = '', this.screen = '', this.tripId = ''});
+  final String query; // shop: what was searched
+  final List<ShopItem> items; // shop: the products found
+  ChatAction(
+      {required this.type,
+      required this.label,
+      this.person,
+      this.amountPaise = 0,
+      this.note = '',
+      this.screen = '',
+      this.tripId = '',
+      this.query = '',
+      this.items = const []});
 
   factory ChatAction.fromJson(Map<String, dynamic> j) => ChatAction(
         type: _str(j['type']),
@@ -675,6 +686,45 @@ class ChatAction {
         note: _str(j['note']),
         screen: _str(j['screen']),
         tripId: _str(j['trip_id']),
+        query: _str(j['query']),
+        items: _list(j['items'], ShopItem.fromJson),
+      );
+}
+
+/// A product Pointy AI found in online shops (through Channel3). Pointy
+/// never buys it: the person opens the shop, then can split it or add it
+/// to a trip.
+class ShopItem {
+  final String id;
+  final String title;
+  final String brand;
+  final String imageUrl;
+  final String merchant; // "amazon.com"
+  final String buyUrl;
+  final int pricePaise; // converted to rupees
+  final int wasPricePaise;
+  final String listPrice; // as the shop shows it: "$19.99"
+  ShopItem(
+      {required this.id,
+      required this.title,
+      this.brand = '',
+      this.imageUrl = '',
+      required this.merchant,
+      required this.buyUrl,
+      required this.pricePaise,
+      this.wasPricePaise = 0,
+      this.listPrice = ''});
+
+  factory ShopItem.fromJson(Map<String, dynamic> j) => ShopItem(
+        id: _str(j['id']),
+        title: _str(j['title']),
+        brand: _str(j['brand']),
+        imageUrl: _str(j['image_url']),
+        merchant: _str(j['merchant']),
+        buyUrl: _str(j['buy_url']),
+        pricePaise: _int(j['price_paise']),
+        wasPricePaise: _int(j['was_price_paise']),
+        listPrice: _str(j['list_price']),
       );
 }
 

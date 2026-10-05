@@ -12,6 +12,7 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/config"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/httpapi"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/shop"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/store"
 )
 
@@ -54,6 +55,16 @@ func main() {
 		g := ai.NewGroq(key, env("POINTY_AI_MODEL", ""), env("POINTY_AI_VISION_MODEL", ""))
 		svc.SetAssistant(g)
 		log.Printf("AI features on (Groq, model %s)", env("POINTY_AI_MODEL", ai.DefaultModel))
+	}
+	// Product search for Pointy AI's "find me…" answers, with Channel3.
+	if key := env("CHANNEL3_API_KEY", ""); key != "" {
+		sh, err := shop.New(key, env("POINTY_INR_PER_UNIT", "85"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		sh.BaseURL = env("CHANNEL3_BASE_URL", shop.DefaultBaseURL)
+		svc.SetShopper(sh)
+		log.Print("shopping on (Channel3)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	if err := svc.Load(ctx); err != nil {

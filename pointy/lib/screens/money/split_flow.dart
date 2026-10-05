@@ -16,15 +16,19 @@ const _steps = ['Bill', 'People', 'Split'];
 
 /// Split a bill you already paid (cash, UPI, card): step 1, the bill.
 class SplitBillScreen extends StatefulWidget {
-  const SplitBillScreen({super.key});
+  const SplitBillScreen({super.key, this.amountPaise, this.what});
+
+  /// Filled in when coming from elsewhere (a product found by Pointy AI).
+  final int? amountPaise;
+  final String? what;
 
   @override
   State<SplitBillScreen> createState() => _SplitBillScreenState();
 }
 
 class _SplitBillScreenState extends State<SplitBillScreen> {
-  final _amount = TextEditingController();
-  final _what = TextEditingController();
+  late final _amount = TextEditingController(text: widget.amountPaise == null ? '' : paiseToInput(widget.amountPaise!));
+  late final _what = TextEditingController(text: widget.what ?? '');
 
   @override
   void dispose() {

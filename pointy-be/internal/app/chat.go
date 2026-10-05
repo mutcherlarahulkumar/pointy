@@ -30,6 +30,7 @@ type ChatFacts struct {
 	YouAsked        []string `json:"money_you_asked_for"`
 	Trips           []string `json:"trips"`
 	People          []string `json:"people"`
+	ShoppingOn      bool     `json:"shopping_available"`
 }
 
 // ChatHistory is the person's conversation, oldest first.
@@ -74,6 +75,7 @@ func (s *Service) Chat(ctx context.Context, userID, text string) ([]*domain.Chat
 	}
 	s.mu.Lock()
 	assistant := s.ai
+	facts.ShoppingOn = s.shop != nil
 	var convo []ai.ChatLine
 	past := s.chats[userID]
 	if len(past) > chatMemory {
@@ -94,11 +96,26 @@ func (s *Service) Chat(ctx context.Context, userID, text string) ([]*domain.Chat
 			log.Printf("ai chat: %v (using the rules)", aerr)
 		} else if strings.TrimSpace(got.Reply) != "" {
 			reply.Text, reply.Source = strings.TrimSpace(got.Reply), "ai"
-			reply.Action = s.chatAction(userID, contacts, got)
+			if got.Action == "shop" {
+				max, _ := ai.ParseRupees(got.Amount)
+				var note string
+				reply.Action, note = s.shopAction(ctx, firstNonEmpty(strings.TrimSpace(got.Query), text), Paise(max))
+				if note != "" {
+					reply.Text = note
+				}
+			} else {
+				reply.Action = s.chatAction(userID, contacts, got)
+			}
 		}
 	}
 	if reply.Source == "rules" {
 		reply.Text, reply.Action = s.chatRules(userID, text, contacts, facts)
+		if isShopping(text) {
+			if q, max := shopRules(text); q != "" {
+				act, note := s.shopAction(ctx, q, max)
+				reply.Action, reply.Text = act, firstNonEmpty(note, fmt.Sprintf("Here are some picks for %s. Prices are converted to rupees; you buy on the shop's site, then you can split it or add it to a trip.", q))
+			}
+		}
 	}
 
 	s.mu.Lock()
@@ -313,5 +330,5 @@ func (s *Service) chatRules(userID, text string, contacts []domain.PublicUser, f
 	case reChatBalance.MatchString(text):
 		return "Your Pointy balance is " + f.Balance + ".", nil
 	}
-	return "I can tell you your balance, what you spent, who owes whom and how your trips are going, or fill in a payment: try \"pay Dev 200 for chai\". I never send money myself; you always confirm.", nil
+	return "I can tell you your balance, what you spent, who owes whom and how your trips are going, fill in a payment (\"pay Dev 200 for chai\") or find things to buy (\"find sunscreen under 1500\"). I never send money myself; you always confirm.", nil
 }

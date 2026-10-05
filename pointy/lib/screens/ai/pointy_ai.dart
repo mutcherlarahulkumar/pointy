@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../api.dart';
 import '../../models.dart';
+import '../../money.dart';
 import '../../tabs.dart';
 import '../../theme.dart';
 import '../../widgets/ai_mark.dart';
@@ -12,6 +14,7 @@ import '../money/request_flow.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
 import '../money/top_up.dart';
+import '../trips/expense_flow.dart';
 import '../trips/trip_shell.dart';
 
 /// Pointy AI: ask about your own money ("what did I spend this week?") or
@@ -31,6 +34,7 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
     'Who owes me money?',
     'How are my trips going?',
     'Pay Dev 200 for chai',
+    'Find sunscreen under 1500',
     'Add money',
   ];
 
@@ -266,7 +270,7 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(m.text, style: AppText.body(color: mine ? Colors.white : AppColors.ink)),
-          if (m.action != null) ...[
+          if (m.action != null && m.action!.type != 'shop') ...[
             const SizedBox(height: 10),
             _actionButton(m.action!),
           ],
@@ -282,12 +286,21 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
       builder: (context, v, child) => Opacity(opacity: v, child: Transform.translate(offset: Offset(0, 8 * (1 - v)), child: child)),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!mine) ...[const AiMark(size: 28), const SizedBox(width: 8)],
-            Flexible(child: bubble),
+            Row(
+              mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (!mine) ...[const AiMark(size: 28), const SizedBox(width: 8)],
+                Flexible(child: bubble),
+              ],
+            ),
+            if (m.action?.type == 'shop' && m.action!.items.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              ShopPicks(items: m.action!.items),
+            ],
           ],
         ),
       ),
@@ -517,6 +530,162 @@ class _PointyAiButtonState extends State<PointyAiButton> with SingleTickerProvid
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Products Pointy AI found, side by side. Each opens the shop; once bought,
+/// it can be split with friends or added to a trip as an expense.
+class ShopPicks extends StatelessWidget {
+  const ShopPicks({super.key, required this.items});
+
+  final List<ShopItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 318,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: 36),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _ProductCard(item: items[i]),
+      ),
+    );
+  }
+}
+
+class _ProductCard extends StatelessWidget {
+  const _ProductCard({required this.item});
+
+  final ShopItem item;
+
+  // Short enough for the "What was it?" fields (40 characters).
+  String get _what => item.title.length <= 40 ? item.title : '${item.title.substring(0, 39).trimRight()}…';
+
+  Future<void> _open(BuildContext context) async {
+    final ok = await launchUrl(Uri.parse(item.buyUrl), mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) showError(context, 'Could not open ${item.merchant}');
+  }
+
+  Future<void> _addToTrip(BuildContext context) async {
+    final List<Trip> open;
+    try {
+      open = (await api.trips()).where((t) => t.isOpen).toList();
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+      return;
+    }
+    if (!context.mounted) return;
+    if (open.isEmpty) {
+      showMessage(context, 'You have no open trip. Plan one from the Trips tab.');
+      return;
+    }
+    final trip = open.length == 1
+        ? open.first
+        : await showModalBottomSheet<Trip>(
+            context: context,
+            builder: (c) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(padding: const EdgeInsets.all(16), child: Text('Add to which trip?', style: AppText.heading())),
+                  for (final t in open)
+                    ListTile(leading: const Icon(Icons.luggage_rounded), title: Text(t.name), onTap: () => Navigator.pop(c, t)),
+                ],
+              ),
+            ),
+          );
+    if (trip == null || !context.mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ExpenseAmountScreen(trip: trip, amountPaise: item.pricePaise, what: _what, payee: item.merchant),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 200,
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.line)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 110,
+            width: double.infinity,
+            color: AppColors.ground,
+            child: item.imageUrl.isEmpty
+                ? const Icon(Icons.shopping_bag_outlined, color: AppColors.slate, size: 36)
+                : Image.network(
+                    item.imageUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag_outlined, color: AppColors.slate, size: 36),
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.detail(color: AppColors.ink, weight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(formatPaise(item.pricePaise), style: AppText.body(color: AppColors.pine700, weight: FontWeight.w700)),
+                    if (item.wasPricePaise > item.pricePaise) ...[
+                      const SizedBox(width: 6),
+                      Text(formatPaise(item.wasPricePaise),
+                          style: AppText.small().copyWith(decoration: TextDecoration.lineThrough)),
+                    ],
+                  ],
+                ),
+                Text('${item.listPrice} at ${item.merchant}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.small()),
+              ],
+            ),
+          ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 36), textStyle: AppText.detail(weight: FontWeight.w700)),
+                    onPressed: () => _open(context),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('Open shop'),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 34), padding: EdgeInsets.zero, textStyle: AppText.small(weight: FontWeight.w700)),
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => SplitBillScreen(amountPaise: item.pricePaise, what: _what),
+                        )),
+                        child: const Text('Split it'),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 34), padding: EdgeInsets.zero, textStyle: AppText.small(weight: FontWeight.w700)),
+                        onPressed: () => _addToTrip(context),
+                        child: const Text('Add to trip'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
