@@ -55,7 +55,10 @@ func (s *Service) SetPayPalEmail(userID, email string) (Me, error) {
 
 // availL is what an account can spend right now: its balance less any
 // money held for a withdrawal on its way to PayPal.
-func (s *Service) availL(account string) Paise { return s.ledger.Owed(account) - s.holds[account] }
+// It also leaves out trip-share money promised to an open group purchase.
+func (s *Service) availL(account string) Paise {
+	return s.ledger.Owed(account) - s.holds[account] - s.heldForBuysL(account)
+}
 
 // Withdraw pays money from your Pointy balance to your PayPal account, from
 // where you move it to your bank.

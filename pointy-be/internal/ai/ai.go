@@ -25,6 +25,45 @@ type Assistant interface {
 	// Chat answers the person's question about their own money from facts
 	// the app read from its database, and may suggest one action.
 	Chat(ctx context.Context, in ChatInput) (ChatReply, error)
+	// PickProducts chooses what a trip group should buy from products the
+	// app found, and says why for each pick.
+	PickProducts(ctx context.Context, in PickInput) (Picks, error)
+}
+
+// PickInput is a group's shopping request and the products found for it.
+// Money is already formatted in rupees; the model never does arithmetic.
+type PickInput struct {
+	Request    string          `json:"request"`     // what the person asked for
+	TripName   string          `json:"trip_name"`   // "Goa trip"
+	TripPlace  string          `json:"trip_place"`  // "Goa"
+	People     int             `json:"people"`      // how many share the cost
+	Budget     string          `json:"budget"`      // "₹3,000" or ""
+	WalletLeft string          `json:"wallet_left"` // what is left in the trip wallet
+	Candidates []PickCandidate `json:"candidates"`
+}
+
+// PickCandidate is one product the app found.
+type PickCandidate struct {
+	Index     int    `json:"index"`
+	Title     string `json:"title"`
+	Brand     string `json:"brand"`
+	Shop      string `json:"shop"`
+	Price     string `json:"price"`      // "₹1,275"
+	EachPays  string `json:"each_pays"`  // "₹425"
+	WasPrice  string `json:"was_price"`  // "" or "₹1,600"
+	FitsMoney bool   `json:"fits_money"` // within the budget and the wallet
+}
+
+// Picks is the model's choice: up to three candidate indexes, best first,
+// each with a one-sentence reason, and a one-line reply to the group.
+type Picks struct {
+	Picks []Pick `json:"picks"`
+	Reply string `json:"reply"`
+}
+
+type Pick struct {
+	Index int    `json:"index"`
+	Why   string `json:"why"`
 }
 
 // ChatInput is everything the assistant may know: the person's facts

@@ -59,6 +59,9 @@ func (s *Service) Settle(tripID, userID string) (Settlement, error) {
 	if err == nil && t.OrganiserID != userID {
 		err = domain.Forbidden("only the organiser can settle the trip")
 	}
+	if err == nil && s.openBuysOnTripL(tripID) {
+		err = domain.Conflict("group_buy_open", "a group purchase is still being decided; finish or call it off first", nil)
+	}
 	if err != nil {
 		return Settlement{}, err
 	}

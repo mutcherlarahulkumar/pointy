@@ -196,6 +196,50 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		}
 		return map[string]any{"query": in.Query, "items": items}, nil
 	})
+	// ---- the trip's shopping agent and group purchases (all or nothing)
+	authed("POST /api/trips/{id}/shop-agent", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.ShopForTrip(r.Context(), r.PathValue("id"), userID(r), in.Text)
+	})
+	authed("POST /api/trips/{id}/group-buys", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			SearchID string `json:"search_id"`
+			Index    int    `json:"index"`
+			Why      string `json:"why"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.ProposeGroupBuy(r.PathValue("id"), userID(r), in.SearchID, in.Index, in.Why)
+	})
+	authed("GET /api/trips/{id}/group-buys", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.GroupBuys(r.Context(), r.PathValue("id"), userID(r))
+	})
+	authed("GET /api/group-buys/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.GroupBuy(r.Context(), r.PathValue("id"), userID(r))
+	})
+	authed("POST /api/group-buys/{id}/join", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Via string `json:"via"` // wallet or paypal
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.JoinGroupBuy(r.Context(), r.PathValue("id"), userID(r), in.Via)
+	})
+	authed("POST /api/group-buys/{id}/decline", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.DeclineGroupBuy(r.Context(), r.PathValue("id"), userID(r))
+	})
+	// After approving on PayPal (or at once in demo mode) the app asks the
+	// server to place the hold; PayPal's return page does the same.
+	authed("POST /api/group-buys/paypal/{orderID}/authorize", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.AuthorizeGroupBuyOrder(r.Context(), r.PathValue("orderID"), userID(r))
+	})
 	authed("POST /api/quick-pay", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
 			Text string `json:"text"`
@@ -389,6 +433,20 @@ func (s *server) paypalReturn(w http.ResponseWriter, r *http.Request) {
 	orderID := r.URL.Query().Get("token")
 	if orderID == "" {
 		page(w, http.StatusBadRequest, "Something is missing", "PayPal did not say which payment this was. Go back to Pointy and try again.", false)
+		return
+	}
+	if s.svc.IsGroupBuyOrder(orderID) {
+		g, err := s.svc.AuthorizeGroupBuyOrder(r.Context(), orderID, "")
+		if err != nil {
+			log.Printf("paypal return %s: %v", orderID, err)
+			page(w, http.StatusOK, "Almost there", "We could not place the hold yet. Go back to Pointy and tap “I've approved it”.", false)
+			return
+		}
+		body := "Your part is held on PayPal. You are only charged if everyone says yes. Go back to Pointy."
+		if g.Status == "paid" {
+			body = "Everyone said yes, so the purchase is paid. Go back to Pointy."
+		}
+		page(w, http.StatusOK, "You're in", body, true)
 		return
 	}
 	d, err := s.svc.CaptureDeposit(r.Context(), orderID)

@@ -19,7 +19,8 @@ type Store interface {
 	// Save writes the changed objects atomically. Items are *domain.User,
 	// domain.Session, domain.SessionEnd, *domain.Trip, domain.Entry,
 	// *domain.Deposit, *domain.Expense, *domain.DepositRequest,
-	// *domain.Plan, *domain.Alert and *domain.MoneyRequest.
+	// *domain.Plan, *domain.Alert, *domain.MoneyRequest, *domain.Payout and
+	// *domain.GroupBuy.
 	Save(ctx context.Context, items []any) error
 }
 
@@ -37,6 +38,7 @@ type Snapshot struct {
 	MoneyRequests []*domain.MoneyRequest
 	Chats         []*domain.ChatMessage
 	Payouts       []*domain.Payout
+	GroupBuys     []*domain.GroupBuy
 }
 
 // MemoryStore keeps nothing: state lives only as long as the process. Tests
@@ -116,6 +118,7 @@ func (s *Service) loadL(ctx context.Context) error {
 	s.alerts = snap.Alerts
 	s.moneyRequests = snap.MoneyRequests
 	s.payouts = snap.Payouts
+	s.groupBuys = snap.GroupBuys
 	s.holds = map[string]Paise{}
 	s.chats = map[string][]*domain.ChatMessage{}
 	for _, m := range snap.Chats {

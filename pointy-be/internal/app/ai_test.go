@@ -23,6 +23,13 @@ type fakeAI struct {
 	quickIn     ai.QuickPayInput
 	chat        ai.ChatReply
 	chatIn      ai.ChatInput
+	picks       ai.Picks
+	picksIn     ai.PickInput
+}
+
+func (f *fakeAI) PickProducts(_ context.Context, in ai.PickInput) (ai.Picks, error) {
+	f.picksIn = in
+	return f.picks, f.err
 }
 
 func (f *fakeAI) Chat(_ context.Context, in ai.ChatInput) (ai.ChatReply, error) {

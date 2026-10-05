@@ -72,11 +72,12 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 | Requests | `GET/POST /api/money-requests`, `POST /api/money-requests/{id}/pay`, `.../decline`, `POST /api/splits` |
 | Activity | `GET /api/history`, `GET /api/alerts`, `POST /api/alerts/seen`, `POST /api/suggestions` |
 | Trips | `GET/POST /api/trips`, `GET /api/trips/{id}`, `POST /api/trips/{id}/members`, `POST /api/trips/{id}/deposits` (from your balance) |
+| Buy together | `POST /api/trips/{id}/shop-agent` (`{"text"}` → `search_id`, up to 3 `picks` with `why`, `each_paise`), `POST /api/trips/{id}/group-buys` (`{"search_id","index","why"}`), `GET /api/trips/{id}/group-buys`, `GET /api/group-buys/{id}`, `POST /api/group-buys/{id}/join` (`{"via": "wallet"|"paypal"}`; PayPal answers with the share's `approve_url`), `POST /api/group-buys/paypal/{orderID}/authorize`, `POST /api/group-buys/{id}/decline` |
 | Trip money | `GET/POST /api/trips/{id}/expenses` (`mode`: `member` with `payee_user_id`, any Pointy user, or `reimburse`), `GET/PUT /api/trips/{id}/budgets`, `POST .../budget-check`, `GET .../insights`, `GET .../settlement`, `POST .../settle` (refunds go to balances) |
 | Assistant | `POST /api/trips/{id}/assistant/plan`, `POST .../plans/{planID}/confirm`, `GET /api/trips/{id}/requests`, `POST /api/requests/{id}/remind`, `POST /api/requests/{id}/pay` |
 | PayPal | `GET /paypal/return` (finishes a checkout), `GET /paypal/cancel`, `POST /webhooks/paypal` |
 
-Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
+Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `group_buy_open`, `group_buy_closed`, `search_expired`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
 
 ## AI features (optional)
 
@@ -91,6 +92,18 @@ With `GROQ_API_KEY` set, `internal/ai` uses Groq's OpenAI-compatible chat API (`
 - **Receipt scanning**: `POST /api/receipts/scan` with `{"image_base64": "..."}` (JPEG/PNG, up to 3 MB) returns the total in paise, merchant, date, category and a short description. Read by Groq's vision model (`POINTY_AI_VISION_MODEL`, default `meta-llama/llama-4-scout-17b-16e-instruct`). Nothing is saved; the app fills the expense form and the person checks it. Non-rupee bills and photos that are not receipts are turned away. Answers `503 ai_off` when no key is set.
 
 Requests ask for JSON matching a schema; on the gpt-oss models Groq enforces it strictly (constrained decoding), and answers are validated either way. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
+
+## Buy together (group purchases)
+
+The trip's shopping agent searches the shops (`Shopper`: Channel3, or `shop.Demo` without a key) and the AI picks up to three products with a reason (`ai.PickProducts`; rules without a key: the shop's best matches, over-budget last). The server keeps the search, so a proposal uses the price it saw, never one sent by a phone.
+
+A group purchase is split equally over the trip and paid only when every share is in:
+
+- `wallet`: the share stays in the person's trip share but is held (worked out from open purchases, so it survives a restart and cannot be spent twice).
+- `paypal`: an Orders v2 order with intent `AUTHORIZE`. After approval `AuthorizeOrder` places the hold (PayPal's return page does it too).
+- When the last share is in, every authorization is captured, each captured share is credited to the person's trip share, and one `spend` entry pays the whole amount out of the trip wallet; an expense (`mode: group_buy`) is written.
+- A decline, or 48 hours without everyone (`expired`), voids every authorization. A failed capture marks it `failed`: money already captured stays in that person's trip share and the other holds are voided.
+- Settle-up waits until no purchase is open (`group_buy_open`).
 
 ## PayPal sandbox
 

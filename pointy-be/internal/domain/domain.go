@@ -295,3 +295,40 @@ type ShopItem struct {
 	WasPrice  Paise  `json:"was_price_paise,omitempty"`
 	ListPrice string `json:"list_price"` // as the shop shows it: "$19.99"
 }
+
+// GroupBuy is something the trip's AI agent found, bought together: every
+// member's share is either held in their trip share or authorized on their
+// PayPal, and it is only paid when all of them are in. If anyone says no,
+// or time runs out, every hold is released and every authorization voided.
+type GroupBuy struct {
+	ID         string          `json:"id"`
+	TripID     string          `json:"trip_id"`
+	ProposedBy string          `json:"proposed_by"`
+	Request    string          `json:"request"` // what the person asked the agent
+	Why        string          `json:"why"`     // the agent's reason for this pick
+	Item       ShopItem        `json:"item"`
+	Category   Category        `json:"category"`
+	Amount     Paise           `json:"amount_paise"`
+	Shares     []GroupBuyShare `json:"shares"`
+	// Status: open (waiting for people), paid, cancelled, expired, failed.
+	Status    string     `json:"status"`
+	Note      string     `json:"note,omitempty"` // why it was cancelled or failed
+	ExpenseID string     `json:"expense_id,omitempty"`
+	Deadline  time.Time  `json:"deadline"`
+	CreatedAt time.Time  `json:"created_at"`
+	DoneAt    *time.Time `json:"done_at,omitempty"`
+}
+
+// GroupBuyShare is one person's part of a GroupBuy.
+type GroupBuyShare struct {
+	UserID string `json:"user_id"`
+	Amount Paise  `json:"amount_paise"`
+	// Status: waiting, in (held or authorized), declined.
+	Status string `json:"status"`
+	// Via: wallet (held in their trip share) or paypal (authorized).
+	Via         string     `json:"via,omitempty"`
+	OrderID     string     `json:"paypal_order_id,omitempty"`
+	ApproveURL  string     `json:"approve_url,omitempty"`
+	AuthID      string     `json:"paypal_authorization_id,omitempty"`
+	CommittedAt *time.Time `json:"committed_at,omitempty"`
+}

@@ -390,6 +390,8 @@ func (m *memStore) Load(context.Context) (*Snapshot, error) {
 			s.Alerts = append([]*domain.Alert{v}, s.Alerts...)
 		case *domain.MoneyRequest:
 			s.MoneyRequests = append(s.MoneyRequests, v)
+		case *domain.GroupBuy:
+			s.GroupBuys = append([]*domain.GroupBuy{v}, s.GroupBuys...)
 		}
 	}
 	return s, nil
