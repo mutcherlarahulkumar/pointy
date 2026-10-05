@@ -802,3 +802,122 @@ class Payout {
         createdAt: parseIst(j['created_at'] as String?),
       );
 }
+
+/// One product the trip's shopping agent suggests, with its reason.
+class AgentPick {
+  final int index;
+  final ShopItem item;
+  final String why;
+  final int eachPaise;
+  final bool fitsBudget;
+  AgentPick({required this.index, required this.item, required this.why, required this.eachPaise, required this.fitsBudget});
+
+  factory AgentPick.fromJson(Map<String, dynamic> j) => AgentPick(
+        index: _int(j['index']),
+        item: ShopItem.fromJson(_map(j['item'])),
+        why: _str(j['why']),
+        eachPaise: _int(j['each_paise']),
+        fitsBudget: j['fits_budget'] == true,
+      );
+}
+
+/// The agent's answer: up to three picks. Nothing is bought until a pick is
+/// proposed and everyone says yes.
+class AgentAnswer {
+  final String searchId;
+  final String query;
+  final int budgetPaise;
+  final int people;
+  final String reply;
+  final List<AgentPick> picks;
+  final String source; // ai or rules
+  AgentAnswer(
+      {required this.searchId,
+      required this.query,
+      required this.budgetPaise,
+      required this.people,
+      required this.reply,
+      required this.picks,
+      required this.source});
+
+  factory AgentAnswer.fromJson(Map<String, dynamic> j) => AgentAnswer(
+        searchId: _str(j['search_id']),
+        query: _str(j['query']),
+        budgetPaise: _int(j['budget_paise']),
+        people: _int(j['people']),
+        reply: _str(j['reply']),
+        picks: _list(j['picks'], AgentPick.fromJson),
+        source: _str(j['source']),
+      );
+}
+
+/// One person's part of a group purchase.
+class GroupBuyShare {
+  final String userId;
+  final int amountPaise;
+  final String status; // waiting, in, declined
+  final String via; // wallet or paypal
+  final String orderId;
+  final String approveUrl;
+  GroupBuyShare(
+      {required this.userId, required this.amountPaise, required this.status, this.via = '', this.orderId = '', this.approveUrl = ''});
+
+  bool get isIn => status == 'in';
+
+  factory GroupBuyShare.fromJson(Map<String, dynamic> j) => GroupBuyShare(
+        userId: _str(j['user_id']),
+        amountPaise: _int(j['amount_paise']),
+        status: _str(j['status']),
+        via: _str(j['via']),
+        orderId: _str(j['paypal_order_id']),
+        approveUrl: _str(j['approve_url']),
+      );
+}
+
+/// Something the group buys together: paid only when everyone is in.
+class GroupBuy {
+  final String id;
+  final String tripId;
+  final String proposedBy;
+  final String request;
+  final String why;
+  final ShopItem item;
+  final String category;
+  final int amountPaise;
+  final List<GroupBuyShare> shares;
+  final String status; // open, paying, paid, cancelled, expired, failed
+  final String note;
+  final DateTime deadline;
+  GroupBuy(
+      {required this.id,
+      required this.tripId,
+      required this.proposedBy,
+      required this.request,
+      required this.why,
+      required this.item,
+      required this.category,
+      required this.amountPaise,
+      required this.shares,
+      required this.status,
+      required this.note,
+      required this.deadline});
+
+  bool get isOpen => status == 'open' || status == 'paying';
+  int get inCount => shares.where((s) => s.isIn).length;
+  GroupBuyShare? shareOf(String userId) => shares.where((s) => s.userId == userId).firstOrNull;
+
+  factory GroupBuy.fromJson(Map<String, dynamic> j) => GroupBuy(
+        id: _str(j['id']),
+        tripId: _str(j['trip_id']),
+        proposedBy: _str(j['proposed_by']),
+        request: _str(j['request']),
+        why: _str(j['why']),
+        item: ShopItem.fromJson(_map(j['item'])),
+        category: _str(j['category']),
+        amountPaise: _int(j['amount_paise']),
+        shares: _list(j['shares'], GroupBuyShare.fromJson),
+        status: _str(j['status']),
+        note: _str(j['note']),
+        deadline: parseIst(j['deadline'] as String?),
+      );
+}

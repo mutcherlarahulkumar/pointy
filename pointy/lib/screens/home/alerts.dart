@@ -92,6 +92,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         'share' => (Icons.account_balance_wallet_outlined, AppColors.pendingBg, AppColors.pending),
         'request' => (Icons.call_received_rounded, AppColors.pendingBg, AppColors.pending),
         'assistant' => (Icons.auto_awesome, AppColors.amber100, AppColors.amber900),
+        'group_buy' => (Icons.shopping_bag_outlined, AppColors.amber100, AppColors.amber900),
         'deposit' => (Icons.savings_outlined, AppColors.pine100, AppColors.pine700),
         'trip' => (Icons.luggage_outlined, AppColors.pine100, AppColors.pine700),
         'money' => (Icons.payments_outlined, AppColors.personalBg, AppColors.personal),

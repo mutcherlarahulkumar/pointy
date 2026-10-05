@@ -166,6 +166,18 @@ class ApiClient {
       Trip.fromJson(await _obj('POST', '/api/trips/$tripId/members', body: {'members': ids}));
   Future<Trip> depositFromBalance(String tripId, int amountPaise, {required String key}) async => Trip.fromJson(
       await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise}, key: key));
+  // The trip's shopping agent and group purchases
+  Future<AgentAnswer> shopAgent(String tripId, String text) async =>
+      AgentAnswer.fromJson(await _obj('POST', '/api/trips/$tripId/shop-agent', body: {'text': text}));
+  Future<GroupBuy> proposeGroupBuy(String tripId, String searchId, AgentPick pick, {required String key}) async => GroupBuy.fromJson(
+      await _obj('POST', '/api/trips/$tripId/group-buys', body: {'search_id': searchId, 'index': pick.index, 'why': pick.why}, key: key));
+  Future<List<GroupBuy>> groupBuys(String tripId) async => (await _arr('GET', '/api/trips/$tripId/group-buys')).map(GroupBuy.fromJson).toList();
+  Future<GroupBuy> groupBuy(String id) async => GroupBuy.fromJson(await _obj('GET', '/api/group-buys/$id'));
+  Future<GroupBuy> joinGroupBuy(String id, String via, {required String key}) async =>
+      GroupBuy.fromJson(await _obj('POST', '/api/group-buys/$id/join', body: {'via': via}, key: key));
+  Future<GroupBuy> declineGroupBuy(String id) async => GroupBuy.fromJson(await _obj('POST', '/api/group-buys/$id/decline'));
+  Future<GroupBuy> authorizeGroupBuy(String orderId) async =>
+      GroupBuy.fromJson(await _obj('POST', '/api/group-buys/paypal/${Uri.encodeComponent(orderId)}/authorize'));
   Future<List<Expense>> expenses(String tripId) async =>
       (await _arr('GET', '/api/trips/$tripId/expenses')).map(Expense.fromJson).toList();
   Future<Expense> addExpense(String tripId, Map<String, dynamic> body, {required String key}) async =>
