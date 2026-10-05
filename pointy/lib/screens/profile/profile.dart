@@ -27,6 +27,7 @@ import '../pay/scan.dart';
 import '../trips/buy_together.dart';
 import '../trips/expense_flow.dart';
 import '../trips/new_trip.dart';
+import '../money/bill_split.dart';
 import '../money/my_qr.dart';
 import '../money/paypal_account.dart';
 import '../money/requests.dart';
@@ -193,6 +194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         (Icons.north_east_rounded, 'Pay someone', 'Instant, to anyone on Pointy', () => _go(const PayPersonScreen())),
         (Icons.call_received_rounded, 'Request money', 'Ask someone to pay you', () => _go(const RequestPersonScreen())),
         (Icons.call_split_rounded, 'Split a bill', 'Everyone gets a request for their part', () => _go(const SplitBillScreen())),
+        (Icons.receipt_long_rounded, 'Split by items', 'Scan the bill; each pays for what they had', () => _go(const BillSplitScreen())),
         (Icons.qr_code_scanner_rounded, 'Scan a QR', 'Pay a friend\'s Pointy QR code', () => _go(const ScanScreen())),
         (Icons.qr_code_2_rounded, 'My QR', 'Friends scan it to pay you', () => _go(const MyQrScreen())),
         (Icons.swap_vert_rounded, 'Requests', 'Money asked of you, and by you', () => _go(const RequestsScreen())),

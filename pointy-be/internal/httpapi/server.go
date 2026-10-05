@@ -387,6 +387,13 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 	authed("POST /api/money-requests/{id}/decline", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.DeclineMoneyRequest(userID(r), r.PathValue("id"))
 	})
+	authed("POST /api/splits/items", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in app.ItemSplitInput
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.SplitByItems(userID(r), in)
+	})
 	authed("POST /api/splits", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in app.SplitBillInput
 		if err := body(r, &in); err != nil {
