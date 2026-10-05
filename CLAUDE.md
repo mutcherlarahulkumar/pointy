@@ -1,5 +1,13 @@
 # Pointy — handoff for Claude Code / Cowork
 
+> **Current state (read first).** Since this brief was written the project changed course; where it disagrees with the sections below, this note wins.
+> - **India:** PayPal does not pay between Indian accounts and Payouts is not offered in India. PayPal is used **only for adding money** (Orders API checkout, US sandbox business account, USD). Payments between people, splits, trip expenses, refunds and deposit requests move inside Pointy's ledger. No payouts, no invoices, no UPI QR.
+> - **Accounts:** phone + 6-digit PIN, bearer tokens. The `X-User-Id` header and demo users are gone; there is no seed data and the clock is real (IST).
+> - **Storage:** Postgres via `DATABASE_URL` (`internal/store`), in-memory working copy, every change saved in one transaction. One instance per database.
+> - **New features:** pay a friend by phone or Pointy QR, money requests, split a bill, top-ups, trip members by phone, deposits from balance or PayPal, `reimburse` / `member` trip expenses, settle into balances, unread alerts.
+> - **App:** talks to `https://pointy-ceoi.onrender.com` by default (`--dart-define=API_BASE` overrides). CI (`.github/workflows/apk.yml`) tests everything and publishes the APK as release `apk-<branch>`.
+> - API reference: `pointy-be/Readme.md`. Demo script and Render settings: `README.md`.
+
 Read this whole file before changing anything. It is the brief for finishing the project in this repo:
 `https://github.com/mutcherlarahulkumar/pointy`
 
