@@ -172,6 +172,35 @@ func (g *Groq) ParseInstruction(ctx context.Context, in InstructionInput) (Instr
 	return out, err
 }
 
+const quickPaySystem = `You read one-line payment messages typed into Pointy, an Indian payments app, for example "pay Asha 200 for coffee", "send 1.5k to Dev for the cab" or "ask Meera for 500 for movie tickets".
+Work out:
+- action: "request" when the person wants to receive money (ask, request, collect, get money from someone), otherwise "pay".
+- person: who to pay or ask. Use the name exactly as written in the contacts list when it matches (a first name or nickname for a listed person counts). If the message gives a 10-digit Indian mobile number, use those 10 digits. Otherwise "".
+- amount_rupees: plain digits with optional paise ("200", "1500", "99.50"). Understand shorthand such as 2k = 2000, 1.5k = 1500, "five hundred". "" if no amount.
+- note: what it is for, two to four words without "for" ("coffee", "cab to airport"), or "".
+- understood: false if the message is not about paying or requesting money.
+- reply: one short, friendly sentence. If something is missing (who, or how much), ask for it. Do not say the money was sent: the person still confirms.
+Never invent people or amounts. Answer with JSON only.`
+
+// ParseQuickPay reads a one-line payment.
+func (g *Groq) ParseQuickPay(ctx context.Context, in QuickPayInput) (QuickPay, error) {
+	data, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		return QuickPay{}, err
+	}
+	var out QuickPay
+	err = g.complete(ctx, g.model, quickPaySystem, string(data), "quick_pay",
+		obj(map[string]any{
+			"understood":    map[string]any{"type": "boolean"},
+			"action":        map[string]any{"type": "string", "enum": []string{"pay", "request"}},
+			"person":        str,
+			"amount_rupees": str,
+			"note":          str,
+			"reply":         str,
+		}, "understood", "action", "person", "amount_rupees", "note", "reply"), &out)
+	return out, err
+}
+
 const receiptSystem = `You read photos of bills and receipts for Pointy, an Indian payments app, so a trip expense can be filled in.
 - is_receipt: false if the photo is not a bill or receipt, or the total cannot be read.
 - merchant: the shop or restaurant name as printed, short.

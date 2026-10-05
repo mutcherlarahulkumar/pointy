@@ -16,6 +16,7 @@ import '../../widgets/tile_icon.dart';
 import '../money/my_qr.dart';
 import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
+import '../money/quick_pay.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
 import '../money/top_up.dart';
@@ -153,6 +154,8 @@ class _HomeScreenState extends State<HomeScreen> {
               _action(Icons.qr_code_scanner_rounded, 'Scan', () => _go(const ScanScreen())),
             ],
           ),
+          const SizedBox(height: 16),
+          _sayIt(),
           if (d.toPay.isNotEmpty) ...[
             const SizedBox(height: 16),
             _waiting(d.toPay),
@@ -203,6 +206,33 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// Opens "Say it": type a payment in one line and the AI fills it in.
+  Widget _sayIt() {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: () => _go(const QuickPayScreen()),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.auto_awesome, size: 20, color: AppColors.amber500),
+              const SizedBox(width: 10),
+              Expanded(child: Text('Say it: "Pay Dev 200 for chai"', overflow: TextOverflow.ellipsis, style: AppText.body(color: AppColors.slate))),
+              const Icon(Icons.keyboard_voice_outlined, size: 20, color: AppColors.slate),
+            ],
+          ),
+        ),
       ),
     );
   }

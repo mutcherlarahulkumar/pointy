@@ -112,3 +112,16 @@ func TestReadReceiptSendsTheImageToTheVisionModel(t *testing.T) {
 		t.Fatalf("image part %v", img)
 	}
 }
+
+func TestParseQuickPay(t *testing.T) {
+	g, body, _ := fakeGroq(t, 200, "stop", `{"understood":true,"action":"pay","person":"Asha Rao","amount_rupees":"200","note":"coffee","reply":"Pay Asha ₹200 for coffee?"}`)
+	got, err := g.ParseQuickPay(context.Background(), QuickPayInput{Text: "pay asha 200 for coffee", Contacts: []string{"Asha Rao", "Dev Mehta"}})
+	if err != nil || got.Person != "Asha Rao" || got.Amount != "200" || got.Action != "pay" || got.Note != "coffee" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	msgs := (*body)["messages"].([]any)
+	user := msgs[len(msgs)-1].(map[string]any)["content"].(string)
+	if !strings.Contains(user, "Dev Mehta") || !strings.Contains(user, "pay asha 200 for coffee") {
+		t.Fatalf("contacts or message missing from the request: %s", user)
+	}
+}

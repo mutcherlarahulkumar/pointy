@@ -38,17 +38,19 @@ class RequestPersonScreen extends StatelessWidget {
 
 /// Step 2: how much and why, then send.
 class RequestAmountScreen extends StatefulWidget {
-  const RequestAmountScreen({super.key, required this.person});
+  const RequestAmountScreen({super.key, required this.person, this.amountPaise, this.note});
 
   final Person person;
+  final int? amountPaise;
+  final String? note;
 
   @override
   State<RequestAmountScreen> createState() => _RequestAmountScreenState();
 }
 
 class _RequestAmountScreenState extends State<RequestAmountScreen> {
-  final _amount = TextEditingController();
-  final _note = TextEditingController();
+  late final _amount = TextEditingController(text: widget.amountPaise == null ? '' : paiseToInput(widget.amountPaise!));
+  late final _note = TextEditingController(text: widget.note ?? '');
   final _key = newIdempotencyKey();
   bool _busy = false;
 

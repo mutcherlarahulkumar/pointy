@@ -136,6 +136,15 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 	authed("GET /api/users/lookup", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.LookupPhone(r.URL.Query().Get("phone"))
 	})
+	authed("POST /api/quick-pay", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.QuickPay(r.Context(), userID(r), in.Text)
+	})
 	authed("GET /api/users/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) { return svc.PublicProfile(r.PathValue("id")) })
 
 	// ---- your balance
