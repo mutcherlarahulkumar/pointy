@@ -15,8 +15,9 @@ import '../../widgets/section_title.dart';
 import '../../widgets/success.dart';
 
 /// Add money: to your balance with PayPal, or to a trip share from your
-/// balance or with PayPal. After PayPal approves, the server finishes the
-/// payment itself; this screen notices and shows the result.
+/// balance (a trip is a wallet inside Pointy). After PayPal approves, the
+/// server finishes the payment itself; this screen notices and shows the
+/// result.
 class TopUpScreen extends StatefulWidget {
   const TopUpScreen({super.key, this.trip, this.suggestPaise});
 
@@ -31,14 +32,13 @@ class TopUpScreen extends StatefulWidget {
 class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
   late final _amount = TextEditingController(
       text: widget.suggestPaise != null && widget.suggestPaise! > 0 ? paiseToInput(_roundUp(widget.suggestPaise!)) : '');
-  String _source = 'balance'; // for a trip: balance or paypal
   Deposit? _deposit; // a PayPal checkout waiting for approval
   Timer? _poll;
   bool _busy = false;
   Me? _me;
 
   bool get _forTrip => widget.trip != null;
-  bool get _paypal => !_forTrip || _source == 'paypal';
+  bool get _paypal => !_forTrip;
 
   // Rounds up to whole rupees so suggested amounts look tidy.
   static int _roundUp(int paise) => ((paise + 99) ~/ 100) * 100;
@@ -47,13 +47,18 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    api.me().then((m) {
-      if (!mounted) return;
-      setState(() {
-        _me = m;
-        if (_forTrip && m.personalBalancePaise <= 0) _source = 'paypal';
-      });
-    }).catchError((_) {});
+    _loadMe();
+  }
+
+  void _loadMe() => api.me().then((m) {
+        if (mounted) setState(() => _me = m);
+      }).catchError((_) {});
+
+  // Not enough balance for the trip: add money with PayPal first, then come
+  // back here with the new balance.
+  Future<void> _addToBalanceFirst(int? need) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TopUpScreen(suggestPaise: need)));
+    _loadMe();
   }
 
   @override
@@ -79,9 +84,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
         _done(paise, 'From your balance');
         return;
       }
-      final d = _forTrip
-          ? await api.startTripDeposit(widget.trip!.id, paise, key: newIdempotencyKey())
-          : await api.startTopUp(paise, key: newIdempotencyKey());
+      final d = await api.startTopUp(paise, key: newIdempotencyKey());
       final url = Uri.parse(d.approveUrl);
       if (url.host.endsWith('.invalid')) {
         // Demo mode: PayPal is simulated and approves at once.
@@ -134,10 +137,8 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
     return FlowScaffold(
       appBarTitle: 'Add money',
       title: _forTrip ? 'Put money into ${widget.trip!.name}' : 'Add money',
-      hint: 'Pick an amount, then choose how to pay.',
-      subtitle: _forTrip
-          ? 'It becomes your share of the trip wallet, held in Pointy\'s PayPal business account.'
-          : 'Pay with PayPal. The money goes into Pointy\'s PayPal business account and shows as your balance.',
+      hint: _forTrip ? 'Pick an amount. It moves from your Pointy balance.' : 'Pick an amount, then pay with PayPal.',
+      subtitle: _forTrip ? 'It becomes your share of the trip wallet.' : 'Pay with PayPal; it lands in your Pointy balance.',
       buttonLabel: notEnough ? 'Not enough balance' : (_paypal ? 'Continue to PayPal' : 'Add ${paise == null ? '' : formatPaise(paise)}'),
       busy: _busy,
       onNext: paise == null || notEnough ? null : () => _start(paise),
@@ -146,31 +147,24 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
         AmountField(controller: _amount, onChanged: () => setState(() {}), chipsRupees: const [500, 1000, 2000, 5000]),
         if (_forTrip) ...[
           const SectionTitle('Pay from'),
-          _sourceTile('balance', Icons.account_balance_wallet_outlined, 'Your Pointy balance',
-              balance == null ? 'Loading…' : '${formatPaise(balance)} available · instant'),
-          const SizedBox(height: 8),
-          _sourceTile('paypal', Icons.open_in_new_rounded, 'PayPal', 'Approve on PayPal, then come back'),
+          SurfaceCard(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine700),
+              title: Text('Your Pointy balance', style: AppText.body(weight: FontWeight.w600)),
+              subtitle: Text(balance == null ? 'Loading…' : '${formatPaise(balance)} available · instant', style: AppText.detail()),
+            ),
+          ),
+          if (notEnough) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _addToBalanceFirst(paise - balance),
+              icon: const Icon(Icons.add_card_rounded),
+              label: Text('Add ${formatPaise(paise - balance)} to your balance first'),
+            ),
+          ],
         ],
       ],
-    );
-  }
-
-  Widget _sourceTile(String value, IconData icon, String title, String subtitle) {
-    final on = _source == value;
-    return Material(
-      color: on ? AppColors.pine100 : AppColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: on ? AppColors.pine700 : AppColors.line, width: on ? 2 : 1),
-      ),
-      child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        leading: Icon(icon, color: AppColors.pine700),
-        title: Text(title, style: AppText.body(weight: FontWeight.w600)),
-        subtitle: Text(subtitle, style: AppText.detail()),
-        trailing: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? AppColors.pine700 : AppColors.slate),
-        onTap: () => setState(() => _source = value),
-      ),
     );
   }
 

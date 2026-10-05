@@ -3,11 +3,12 @@
 // (Postgres in production) before answering, so a restart loses nothing.
 // Run one instance per database: the in-memory copy is not shared.
 //
-// Money model: PayPal is used only to bring money in (checkout). Each
+// Money model: Pointy is a wallet. PayPal is used only at the two edges:
+// money comes in with checkout and goes out when a person withdraws. Each
 // person has a personal balance and a share in every trip they are on; all
-// payments, splits, requests and refunds move money between those inside
-// one double-entry ledger, which works in India where PayPal cannot pay
-// between Indian accounts.
+// payments, splits, requests, trip spending and refunds move money between
+// those inside one double-entry ledger, which works in India where PayPal
+// cannot pay between Indian accounts.
 package app
 
 import (
@@ -386,24 +387,6 @@ func (s *Service) StartTopUp(ctx context.Context, userID string, amount Paise) (
 	return s.startOrder(ctx, "", userID, amount, "Pointy balance top-up")
 }
 
-// StartDeposit creates a PayPal order to add money to a trip share.
-func (s *Service) StartDeposit(ctx context.Context, tripID, userID string, amount Paise) (*domain.Deposit, error) {
-	s.mu.Lock()
-	t, err := s.openTripL(tripID, userID)
-	if err == nil {
-		err = checkAmount(amount)
-	}
-	name := ""
-	if t != nil {
-		name = t.Name
-	}
-	s.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	return s.startOrder(ctx, tripID, userID, amount, "Deposit for "+name)
-}
-
 func (s *Service) startOrder(ctx context.Context, tripID, userID string, amount Paise, what string) (*domain.Deposit, error) {
 	id := s.idL("dep")
 	o, perr := s.pp.CreateOrder(ctx, id, amount, what)
@@ -629,17 +612,13 @@ func (s *Service) History(userID string) []HistoryItem {
 			}
 		}
 	}
-	// Money sent to your own PayPal account.
+	// Withdrawals to your own PayPal account.
 	for _, p := range s.payouts {
-		if p.UserID != userID || p.Kind == PayoutMerchant || p.Status == "failed" {
+		if p.UserID != userID || p.Kind != PayoutWithdraw || p.Status == "failed" {
 			continue
 		}
-		h := HistoryItem{Kind: "withdrawal", Wallet: "personal", TripID: p.TripID, Title: "Sent to your PayPal", Subtitle: p.Email + " · " + payoutWords(p.Status),
-			Amount: p.Amount, YourPart: p.Amount, At: p.CreatedAt}
-		if p.Kind == PayoutSettle {
-			h.Title = p.Description
-		}
-		out = append(out, h)
+		out = append(out, HistoryItem{Kind: "withdrawal", Wallet: "personal", Title: "Withdrawn to PayPal", Subtitle: p.Email + " · " + payoutWords(p.Status),
+			Amount: p.Amount, YourPart: p.Amount, At: p.CreatedAt})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	return out

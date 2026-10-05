@@ -27,17 +27,13 @@ class _SettleScreenState extends State<SettleScreen> {
   String _key = newIdempotencyKey();
   bool _busy = false;
 
-  /// Send each part on to PayPal (for people who gave a PayPal email).
-  bool _toPayPal = true;
-
   Future<void> _send(Settlement s) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Send refunds and close the trip?'),
-        content: Text('${formatPaise(s.refundPaise)} goes back to ${s.lines.where((l) => l.refundPaise > 0).length} people'
-            '${_toPayPal ? ': to PayPal for those who added a PayPal email, otherwise to their Pointy balance' : '\'s Pointy balances'}. '
-            'Nobody can pay from this wallet afterwards.'),
+        content: Text('${formatPaise(s.refundPaise)} goes back to ${s.lines.where((l) => l.refundPaise > 0).length} '
+            'people\'s Pointy balances. Nobody can pay from this wallet afterwards.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send refunds')),
@@ -47,7 +43,7 @@ class _SettleScreenState extends State<SettleScreen> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
-      final done = await api.settle(widget.trip.id, key: _key, payout: _toPayPal);
+      final done = await api.settle(widget.trip.id, key: _key);
       setState(() => _settlement = Future.value(done));
     } catch (e) {
       if (e is ApiException && e.status >= 400 && e.status < 500) _key = newIdempotencyKey();
@@ -92,38 +88,19 @@ class _SettleScreenState extends State<SettleScreen> {
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(l.user.name, style: AppText.body(weight: FontWeight.w600)),
-                        subtitle: Text(
-                            'Put in ${formatPaise(l.depositedPaise)} · used ${formatPaise(l.usedPaise)}\n'
-                            '${_where(s, l)}',
+                        subtitle: Text('Put in ${formatPaise(l.depositedPaise)} · used ${formatPaise(l.usedPaise)}',
                             style: AppText.detail()),
-                        isThreeLine: true,
                         trailing: Text(formatPaise(l.refundPaise), style: AppText.heading()),
                       ),
                   ],
                 ),
               ),
-              if (!settled && organiser) ...[
-                const SizedBox(height: 12),
-                Card(
-                  child: SwitchListTile(
-                    secondary: const Icon(Icons.account_balance_rounded, color: AppColors.pine700),
-                    title: Text('Send to PayPal', style: AppText.body(weight: FontWeight.w600)),
-                    subtitle: Text('Each part goes by PayPal Payouts to people who added a PayPal email; the rest go to Pointy balances.',
-                        style: AppText.detail()),
-                    value: _toPayPal,
-                    onChanged: (v) => setState(() => _toPayPal = v),
-                  ),
-                ),
-              ],
               const SizedBox(height: 24),
               if (settled) ...[
                 Row(children: [
                   const Tag('Refunds sent', kind: TagKind.trip),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(s.payouts.isEmpty ? 'Into everyone\'s Pointy balance' : '${s.payouts.length} sent to PayPal, the rest to balances',
-                        style: AppText.small()),
-                  ),
+                  Text('Into everyone\'s Pointy balance', style: AppText.small()),
                 ]),
               ] else if (organiser)
                 FilledButton(
@@ -137,16 +114,6 @@ class _SettleScreenState extends State<SettleScreen> {
         },
       ),
     );
-  }
-
-  /// Where this person's part goes (or went).
-  String _where(Settlement s, SettleLine l) {
-    if (l.refundPaise <= 0) return 'Nothing left to send back';
-    if (s.status != 'open') {
-      final p = s.payouts.where((p) => p.userId == l.user.id).firstOrNull;
-      return p != null ? 'To PayPal · ${p.statusLabel}' : 'To their Pointy balance';
-    }
-    return _toPayPal && l.hasPayPal ? 'Goes to their PayPal' : 'Goes to their Pointy balance${l.hasPayPal ? '' : ' (no PayPal email yet)'}';
   }
 
   Widget _row(String label, int paise, {bool bold = false}) => Padding(

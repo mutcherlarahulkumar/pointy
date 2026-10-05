@@ -10,23 +10,19 @@ import '../../theme.dart';
 import '../../tabs.dart';
 import '../../tour.dart';
 import '../../widgets/ai_card.dart';
-import '../../widgets/ai_mark.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/personal_card.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/skeleton.dart';
 import '../../widgets/tile_icon.dart';
-import '../ai/pointy_ai.dart';
 import '../money/my_qr.dart';
 import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
 import '../money/top_up.dart';
-import '../money/where_money.dart';
 import '../money/withdraw.dart';
-import '../pay/scan.dart';
 import '../profile/profile.dart';
 import 'alerts.dart';
 
@@ -208,8 +204,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
           PersonalCard(
             key: TourKeys.balance,
             balancePaise: me.personalBalancePaise,
-            caption: me.isMock ? 'Demo mode · PayPal is simulated' : 'Held in Pointy\'s PayPal business account',
-            onWhere: () => _go(const WhereMoneyScreen()),
+            caption: me.isMock ? 'Demo mode · PayPal is simulated' : 'Your Pointy wallet',
             actions: [
               CardButton(key: TourKeys.addMoney, icon: Icons.add_rounded, label: 'Add money', primary: true, onTap: () => _go(const TopUpScreen())),
               CardButton(icon: Icons.output_rounded, label: 'Withdraw', onTap: () => _go(const WithdrawScreen())),
@@ -223,11 +218,8 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
               _action(Icons.north_east_rounded, 'Pay', () => _go(const PayPersonScreen())),
               _action(Icons.call_received_rounded, 'Request', () => _go(const RequestPersonScreen())),
               _action(Icons.call_split_rounded, 'Split bill', () => _go(const SplitBillScreen())),
-              _action(Icons.qr_code_scanner_rounded, 'Scan', () => _go(const ScanScreen())),
             ],
           ),
-          const SizedBox(height: 16),
-          KeyedSubtree(key: TourKeys.sayIt, child: _sayIt()),
           if (d.toPay.isNotEmpty) ...[
             const SizedBox(height: 16),
             _waiting(d.toPay),
@@ -281,41 +273,6 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  /// Opens Pointy AI: questions about your money, or a payment in one line.
-  Widget _sayIt() {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(28),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(28),
-        onTap: () => _go(const PointyAiScreen()),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Row(
-            children: [
-              const AiMark(size: 26),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Ask Pointy AI', style: AppText.body(weight: FontWeight.w700)),
-                    Text('"What did I spend this week?" · "Pay Dev 200"', overflow: TextOverflow.ellipsis, style: AppText.small()),
-                  ],
-                ),
-              ),
-              const Icon(Icons.keyboard_voice_outlined, size: 20, color: AppColors.slate),
-            ],
-          ),
-        ),
       ),
     );
   }

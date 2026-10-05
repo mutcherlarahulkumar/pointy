@@ -264,11 +264,11 @@ func TestTripFromDepositsToSettleUp(t *testing.T) {
 		t.Fatal("trip should be active for Dev")
 	}
 
-	// Asha pays her deposit from her balance; Dev with PayPal.
+	// Both put their part in from their Pointy balance.
 	topUp(t, s, a, 5000)
+	topUp(t, s, d, 3000)
 	must[TripView](t)(s.DepositFromBalance(trip, a, domain.Rupees(3000)))
-	dep := must[*domain.Deposit](t)(s.StartDeposit(context.Background(), trip, d, domain.Rupees(3000)))
-	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), dep.OrderID))
+	must[TripView](t)(s.DepositFromBalance(trip, d, domain.Rupees(3000)))
 	v := must[TripView](t)(s.Trip(trip, a))
 	if v.Balance != domain.Rupees(6000) || balance(s, a) != domain.Rupees(2000) {
 		t.Fatalf("wallet %d balance %d", v.Balance, balance(s, a))
@@ -277,11 +277,11 @@ func TestTripFromDepositsToSettleUp(t *testing.T) {
 
 	// Dev paid the shack ₹1,840 by UPI: the wallet pays him back, split 2 ways.
 	dinner := ExpenseInput{Description: "Dinner", Category: domain.Food, Amount: domain.Rupees(1840), Payee: "Beach shack", Mode: ModeReimburse}
-	if _, err := s.AddExpense(context.Background(), trip, d, dinner); code(err) != "budget_warning" {
+	if _, err := s.AddExpense(trip, d, dinner); code(err) != "budget_warning" {
 		t.Fatalf("expected a budget warning, got %v", err)
 	}
 	dinner.ConfirmOverBudget = true
-	e := must[*domain.Expense](t)(s.AddExpense(context.Background(), trip, d, dinner))
+	e := must[*domain.Expense](t)(s.AddExpense(trip, d, dinner))
 	if e.PayeeUserID != d || balance(s, d) != domain.Rupees(1840) {
 		t.Fatalf("Dev should be paid back: %d", balance(s, d))
 	}
@@ -293,19 +293,19 @@ func TestTripFromDepositsToSettleUp(t *testing.T) {
 
 	// Too big for one share.
 	big := ExpenseInput{Description: "Villa", Category: domain.Stay, Amount: domain.Rupees(5000), Mode: ModeMember, PayeeUserID: a}
-	if _, err := s.AddExpense(context.Background(), trip, a, big); code(err) != "insufficient_share" {
+	if _, err := s.AddExpense(trip, a, big); code(err) != "insufficient_share" {
 		t.Fatalf("got %v", err)
 	}
 
 	// Only the organiser settles; everything left goes back to balances.
-	if _, err := s.Settle(context.Background(), trip, d, false); code(err) != "forbidden" {
+	if _, err := s.Settle(trip, d); code(err) != "forbidden" {
 		t.Fatal("Dev is not the organiser")
 	}
-	st := must[Settlement](t)(s.Settle(context.Background(), trip, a, false))
+	st := must[Settlement](t)(s.Settle(trip, a))
 	if st.Refund != domain.Rupees(4160) || balance(s, a) != domain.Rupees(4080) || balance(s, d) != domain.Rupees(3920) {
 		t.Fatalf("refund %d, balances %d %d", st.Refund, balance(s, a), balance(s, d))
 	}
-	if _, err := s.AddExpense(context.Background(), trip, a, dinner); code(err) != "trip_closed" {
+	if _, err := s.AddExpense(trip, a, dinner); code(err) != "trip_closed" {
 		t.Fatal("a settled trip cannot pay")
 	}
 	checkBooks(t, s)
@@ -341,20 +341,6 @@ func TestAssistantRequestsArePaidInApp(t *testing.T) {
 		t.Fatalf("request %+v", r.DepositRequest)
 	}
 	checkBooks(t, s)
-}
-
-func TestPayPalDepositClosesRequest(t *testing.T) {
-	s, _, _ := newTestService(t, nil)
-	a := register(t, s, "Asha", "9876543210")
-	d := register(t, s, "Dev", "9123456780")
-	trip := goa(t, s, a, d)
-	p := must[*domain.Plan](t)(s.DraftPlan(context.Background(), trip, a, "Collect ₹3,000"))
-	made := must[[]*domain.DepositRequest](t)(s.ConfirmPlan(trip, p.ID, a))
-	dep := must[*domain.Deposit](t)(s.StartDeposit(context.Background(), trip, d, domain.Rupees(3000)))
-	must[*domain.Deposit](t)(s.CaptureDeposit(context.Background(), dep.OrderID))
-	if made[0].Status != "paid" || made[0].PaidVia != "paypal" {
-		t.Fatalf("request %+v", made[0])
-	}
 }
 
 // memStore records saves and reloads them, standing in for Postgres to prove

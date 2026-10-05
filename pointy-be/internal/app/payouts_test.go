@@ -82,55 +82,49 @@ func TestWithdrawThatPayPalRefusesOrSendsBack(t *testing.T) {
 	money(t, s, a)
 }
 
-func TestTripPaysAShopByPayPalAndSettlesToPayPal(t *testing.T) {
+func TestTripIsAWalletAndOnlyWithdrawUsesPayPal(t *testing.T) {
 	s, pp, _ := newTestService(t, nil)
 	ctx := context.Background()
 	a := register(t, s, "Asha", "9876543210")
 	d := register(t, s, "Dev", "9123456780")
+	m := register(t, s, "Meera", "9988776655") // not on the trip; runs the beach shack
 	trip := goa(t, s, a, d)
 	for _, u := range []string{a, d} {
 		topUp(t, s, u, 3000)
 		must[TripView](t)(s.DepositFromBalance(trip, u, domain.Rupees(3000)))
 	}
-	dinner := ExpenseInput{Description: "Dinner", Category: domain.Food, Amount: domain.Rupees(1200), Mode: ModePayPal, Payee: "Beach shack", PayeeEmail: "shack@example.com"}
 
-	if _, err := s.AddExpense(ctx, trip, a, ExpenseInput{Description: "Dinner", Amount: 100, Mode: ModePayPal, PayeeEmail: "nope"}); code(err) != "invalid" {
-		t.Fatalf("bad email: %v", err)
+	// Paying by PayPal from a trip is gone.
+	if _, err := s.AddExpense(trip, a, ExpenseInput{Description: "Dinner", Amount: 100, Mode: ModePayPal}); code(err) != "invalid" {
+		t.Fatalf("paypal mode: %v", err)
 	}
-	// PayPal refuses: no expense, the shares are untouched.
-	pp.FailPayout = true
-	if _, err := s.AddExpense(ctx, trip, a, dinner); code(err) != "paypal_error" {
-		t.Fatalf("refused: %v", err)
-	}
-	if es := must[[]*domain.Expense](t)(s.Expenses(trip, a)); len(es) != 0 {
-		t.Fatalf("an expense was written: %+v", es)
-	}
-	pp.FailPayout = false
-	e := must[*domain.Expense](t)(s.AddExpense(ctx, trip, a, dinner))
-	if e.Mode != ModePayPal || e.PayoutID == "" || e.PayeeEmail != "shack@example.com" || e.Payee != "Beach shack" {
-		t.Fatalf("expense %+v", e)
-	}
-	if pp.Payouts[len(pp.Payouts)-1] != "shack@example.com" {
-		t.Fatalf("paid %v", pp.Payouts)
+	// The trip pays a Pointy user: the money lands in Meera's balance.
+	dinner := ExpenseInput{Description: "Dinner", Category: domain.Food, Amount: domain.Rupees(1200), Mode: ModeMember, PayeeUserID: m, ConfirmOverBudget: true}
+	must[*domain.Expense](t)(s.AddExpense(trip, a, dinner))
+	if balance(s, m) != domain.Rupees(1200) {
+		t.Fatalf("Meera got %d", balance(s, m))
 	}
 	tv := must[TripView](t)(s.Trip(trip, a))
-	// ₹6,000 in, ₹1,200 left by PayPal: ₹4,800 in the wallet, ₹2,400 each.
 	if tv.Balance != domain.Rupees(4800) || tv.Spent != domain.Rupees(1200) || tv.MemberDetails[0].Left != domain.Rupees(2400) {
 		t.Fatalf("trip %+v", tv)
 	}
-	money(t, s, a)
 
-	// Settle with payouts: Asha has PayPal and gets ₹2,400 there; Dev has
-	// none, so his ₹2,400 stays in his Pointy balance.
-	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
-	st := must[Settlement](t)(s.Settle(ctx, trip, a, true))
-	if len(st.Payouts) != 1 || st.Payouts[0].UserID != a || st.Payouts[0].Amount != domain.Rupees(2400) || st.Payouts[0].Kind != PayoutSettle {
-		t.Fatalf("settle payouts %+v", st.Payouts)
-	}
-	if balance(s, a) != 0 || balance(s, d) != domain.Rupees(2400) {
+	// Settle: what is left goes back to both balances.
+	must[Settlement](t)(s.Settle(trip, a))
+	if balance(s, a) != domain.Rupees(2400) || balance(s, d) != domain.Rupees(2400) {
 		t.Fatalf("balances Asha %d Dev %d", balance(s, a), balance(s, d))
 	}
-	if v := money(t, s, a); v.BusinessAccount != domain.Rupees(2400) {
+	if len(pp.Payouts) != 0 {
+		t.Fatalf("the trip must not call PayPal: %v", pp.Payouts)
+	}
+
+	// Meera takes her money out to PayPal (and on to her bank).
+	must[Me](t)(s.SetPayPalEmail(m, "meera@example.com"))
+	must[*domain.Payout](t)(s.Withdraw(ctx, m, domain.Rupees(1200)))
+	if balance(s, m) != 0 || len(pp.Payouts) != 1 {
+		t.Fatalf("withdraw: balance %d payouts %v", balance(s, m), pp.Payouts)
+	}
+	if v := money(t, s, a); v.BusinessAccount != domain.Rupees(4800) {
 		t.Fatalf("left at PayPal %d", v.BusinessAccount)
 	}
 }

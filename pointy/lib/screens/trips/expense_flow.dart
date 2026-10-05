@@ -14,6 +14,7 @@ import '../../widgets/amount_field.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/flow_scaffold.dart';
+import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/success.dart';
 import '../../widgets/tag.dart';
@@ -31,12 +32,11 @@ class _Draft {
   int amountPaise = 0;
   String description = '';
   String category = 'other';
-  // paypal: the wallet pays a shop or person by PayPal (a real payout);
-  // member: someone on the trip gets it in their Pointy balance;
+  // The trip is a wallet inside Pointy, so the money goes to a Pointy
+  // balance. member: someone on Pointy (on the trip or not) gets it;
   // reimburse: you already paid, the wallet pays you back.
-  String mode = 'paypal';
-  String payee = ''; // shop name for the receipt
-  String payeeEmail = ''; // mode paypal: the PayPal account to pay
+  String mode = 'member';
+  String payee = ''; // who was paid, for the receipt
   String payeeUserId = '';
   String splitMethod = 'equal';
   final Set<String> participants = {};
@@ -65,7 +65,6 @@ class _Draft {
         'mode': mode,
         'payee': payee,
         if (mode == 'member') 'payee_user_id': payeeUserId,
-        if (mode == 'paypal') 'payee_email': payeeEmail,
         'split_method': splitMethod,
         'participants': [
           for (final id in ordered)
@@ -262,69 +261,68 @@ class _WhoPaidScreen extends StatefulWidget {
 }
 
 class _WhoPaidScreenState extends State<_WhoPaidScreen> {
-  late final _shop = TextEditingController(text: widget.d.payee);
-  late final _email = TextEditingController(text: widget.d.payeeEmail);
+  // A shop name filled in earlier (from a product Pointy AI found) is kept
+  // for "I paid already".
+  late final _shop = TextEditingController(text: widget.d.payeeUserId.isEmpty ? widget.d.payee : '');
 
   @override
   void dispose() {
     _shop.dispose();
-    _email.dispose();
     super.dispose();
   }
-
-  bool get _emailOk => RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(_email.text.trim());
 
   @override
   Widget build(BuildContext context) {
     final d = widget.d;
-    final others = d.trip.memberDetails.where((m) => m.user.id != api.userId).toList();
-    final ok = switch (d.mode) {
-      'paypal' => _emailOk,
-      'member' => d.payeeUserId.isNotEmpty,
-      _ => true,
-    };
+    final ok = d.mode == 'reimburse' || d.payeeUserId.isNotEmpty;
     return FlowScaffold(
       appBarTitle: d.trip.name,
       steps: _steps,
       step: 1,
       title: 'Who gets the money?',
-      hint: 'Choose where the money from the trip wallet goes.',
+      hint: 'The trip wallet pays into a Pointy balance, straight away.',
       subtitle: '${formatPaise(d.amountPaise)} for ${d.description}',
       buttonLabel: 'Continue',
       onNext: ok
           ? () {
-              d.payeeEmail = _email.text.trim().toLowerCase();
-              d.payee = switch (d.mode) {
-                'paypal' => _shop.text.trim().isEmpty ? d.payeeEmail : _shop.text.trim(),
-                'reimburse' => _shop.text.trim(),
-                _ => d.trip.nameOf(d.payeeUserId),
-              };
+              if (d.mode == 'reimburse') d.payee = _shop.text.trim();
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => _SplitScreen(d: d)));
             }
           : null,
       children: [
         _option(
-          on: d.mode == 'paypal',
-          icon: Icons.storefront_outlined,
-          title: 'Pay a shop or person by PayPal',
-          body: 'The trip wallet pays their PayPal account now. Real money leaves by PayPal.',
-          onTap: () => setState(() => d.mode = 'paypal'),
+          on: d.mode == 'member',
+          icon: Icons.send_to_mobile_rounded,
+          title: 'Pay someone on Pointy',
+          body: 'A shop, a friend or someone on the trip. It lands in their Pointy balance.',
+          onTap: () => setState(() => d.mode = 'member'),
         ),
-        if (d.mode == 'paypal') ...[
+        if (d.mode == 'member') ...[
           const SizedBox(height: 8),
-          TextField(
-            controller: _shop,
-            maxLength: 40,
-            decoration: const InputDecoration(labelText: 'Who (optional)', hintText: 'Beach shack, Baga', counterText: ''),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _email,
-            keyboardType: TextInputType.emailAddress,
-            autocorrect: false,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'Their PayPal email', hintText: 'shop@example.com', prefixIcon: Icon(Icons.alternate_email_rounded)),
-          ),
+          if (d.payeeUserId.isEmpty)
+            PersonPicker(
+              onPicked: (p) => setState(() {
+                d.payeeUserId = p.first.id;
+                d.payee = p.first.name;
+              }),
+            )
+          else
+            SurfaceCard(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Avatar(d.payee),
+                title: Text(d.payee, style: AppText.body(weight: FontWeight.w600)),
+                subtitle: Text('Gets it in their Pointy balance', style: AppText.detail()),
+                trailing: TextButton(
+                  onPressed: () => setState(() {
+                    d.payeeUserId = '';
+                    d.payee = '';
+                  }),
+                  child: const Text('Change'),
+                ),
+              ),
+            ),
         ],
         const SizedBox(height: 8),
         _option(
@@ -332,7 +330,10 @@ class _WhoPaidScreenState extends State<_WhoPaidScreen> {
           icon: Icons.reply_rounded,
           title: 'I paid already, pay me back',
           body: 'You paid by cash, UPI or card. The wallet moves it to your Pointy balance.',
-          onTap: () => setState(() => d.mode = 'reimburse'),
+          onTap: () => setState(() {
+            d.mode = 'reimburse';
+            d.payeeUserId = '';
+          }),
         ),
         if (d.mode == 'reimburse') ...[
           const SizedBox(height: 4),
@@ -342,23 +343,6 @@ class _WhoPaidScreenState extends State<_WhoPaidScreen> {
             decoration: const InputDecoration(labelText: 'Paid to (optional)', hintText: 'Beach shack, Baga', counterText: ''),
           ),
         ],
-        const SizedBox(height: 8),
-        _option(
-          on: d.mode == 'member',
-          icon: Icons.person_pin_circle_outlined,
-          title: 'Pay someone on the trip',
-          body: 'Someone else paid, or is owed. It lands in their Pointy balance.',
-          onTap: others.isEmpty ? null : () => setState(() => d.mode = 'member'),
-        ),
-        if (d.mode == 'member')
-          for (final m in others)
-            ListTile(
-              leading: Avatar(m.user.name, size: 36),
-              title: Text(m.user.name),
-              trailing: Icon(d.payeeUserId == m.user.id ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: d.payeeUserId == m.user.id ? AppColors.pine700 : AppColors.slate),
-              onTap: () => setState(() => d.payeeUserId = m.user.id),
-            ),
       ],
     );
   }
@@ -534,9 +518,8 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       nav.push(MaterialPageRoute(
         builder: (_) => SuccessScreen(
           title: switch (d.mode) {
-            'paypal' => 'Sent by PayPal',
             'reimburse' => 'Paid back to you',
-            _ => 'Paid to ${d.trip.nameOf(d.payeeUserId)}',
+            _ => 'Paid to ${d.payee}',
           },
           amount: formatPaise(e.amountPaise),
           subtitle: '${e.description} · from the ${d.trip.name} wallet',
@@ -544,9 +527,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
             ('Category', categoryLabel(e.category)),
             ('Split', e.isEvenSplit && e.shares.isNotEmpty ? '${e.shares.length} ways, ${formatPaise(e.shares.first.amountPaise)} each' : '${e.shares.length} people'),
             if (e.payee.isNotEmpty) ('Paid to', e.payee),
-            if (e.byPayPal) ('PayPal account', e.payeeEmail),
-            if (e.byPayPal) ('Through', 'PayPal Payouts, from Pointy\'s business account'),
-            ('Reference', e.payoutId.isNotEmpty ? e.payoutId : e.id),
+            ('Reference', e.id),
           ],
         ),
       ));
@@ -601,21 +582,15 @@ class _ReviewScreenState extends State<_ReviewScreen> {
               _row(
                   'Money goes to',
                   switch (d.mode) {
-                    'paypal' => '${d.payee} by PayPal',
                     'reimburse' => 'You (paying you back)',
-                    _ => d.trip.nameOf(d.payeeUserId),
+                    _ => '${d.payee}\'s Pointy balance',
                   }),
-              if (d.mode == 'paypal') _row('PayPal account', d.payeeEmail),
               if (d.payee.isNotEmpty && d.mode == 'reimburse') _row('Paid to', d.payee),
               _row('Category', categoryLabel(d.category)),
-              _row('Your part', formatPaise(mine)),
+              _row('Split', shares.length <= 1 ? 'Just you' : '${shares.length} ways, your part ${formatPaise(mine)}'),
               _row('Wallet after', formatPaise(d.trip.balancePaise - d.amountPaise)),
             ],
           ),
-        ),
-        const SectionTitle('Each person'),
-        SurfaceCard(
-          child: Column(children: [for (final e in shares.entries) _row(d.trip.nameOf(e.key), formatPaise(e.value))]),
         ),
       ],
     );

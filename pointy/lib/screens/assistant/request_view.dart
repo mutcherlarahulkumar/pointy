@@ -29,7 +29,7 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
   late Future<(Me, DepositRequest)> _data = _load();
 
   // The latest balance and request status, so the screen updates after
-  // paying with PayPal.
+  // adding money.
   Future<(Me, DepositRequest)> _load() async {
     final me = await api.me();
     final all = await api.requests(widget.trip.id);
@@ -92,21 +92,23 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
                   onPressed: _busy || !enough ? null : _payFromBalance,
                   child: Text(enough ? 'Pay from balance (${formatPaise(me.personalBalancePaise)})' : 'Balance too low (${formatPaise(me.personalBalancePaise)})'),
                 ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.open_in_new_rounded),
-                  label: const Text('Pay with PayPal'),
-                  onPressed: _busy
-                      ? null
-                      : () async {
-                          await Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => TopUpScreen(trip: widget.trip, suggestPaise: r.amountPaise),
-                          ));
-                          if (mounted) setState(() => _data = _load());
-                        },
-                ),
+                if (!enough) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.add_card_rounded),
+                    label: Text('Add ${formatPaise(r.amountPaise - me.personalBalancePaise)} to your balance'),
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            await Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => TopUpScreen(suggestPaise: r.amountPaise - me.personalBalancePaise),
+                            ));
+                            if (mounted) setState(() => _data = _load());
+                          },
+                  ),
+                ],
                 const SizedBox(height: 12),
-                Text('Either way the request is marked paid as soon as the money reaches the trip wallet.',
+                Text('It moves from your Pointy balance into the trip wallet, and the request is marked paid.',
                     textAlign: TextAlign.center, style: AppText.small()),
               ],
             ],

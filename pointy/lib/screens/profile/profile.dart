@@ -14,7 +14,6 @@ import '../ai/ai_settings.dart';
 import '../money/my_qr.dart';
 import '../money/paypal_account.dart';
 import '../money/requests.dart';
-import '../money/where_money.dart';
 import 'how_it_works.dart';
 import 'payment_check.dart';
 
@@ -85,13 +84,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SectionTitle('Money'),
             tile(Icons.qr_code_2_rounded, 'My QR', 'Friends scan it to pay you', () => go(const MyQrScreen())),
             tile(Icons.swap_vert_rounded, 'Requests', 'Money asked of you, and by you', () => go(const RequestsScreen())),
-            tile(Icons.account_balance_rounded, 'PayPal for payouts', me.paypalEmail.isEmpty ? 'Add the PayPal account Pointy pays you out to' : me.paypalEmail,
+            tile(Icons.account_balance_rounded, 'Withdrawal account', me.paypalEmail.isEmpty ? 'Add the PayPal account your withdrawals go to' : 'PayPal · ${me.paypalEmail}',
                 () async {
               await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PayPalAccountScreen(current: me.paypalEmail)));
               setState(() => _me = api.me());
             }),
-            tile(Icons.help_outline_rounded, 'Where is my money?', 'Pointy\'s PayPal business account, your share of it, and payouts',
-                () => go(const WhereMoneyScreen())),
             const SectionTitle('Settings'),
             tile(
               _check == PayCheck.biometric ? Icons.fingerprint_rounded : Icons.pin_rounded,

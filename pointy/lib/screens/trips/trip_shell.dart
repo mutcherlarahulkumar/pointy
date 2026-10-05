@@ -87,7 +87,7 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          trip.isOpen ? const Tag('Open', kind: TagKind.trip) : Tag(categoryLabel(trip.status)),
+          if (!trip.isOpen) Tag(categoryLabel(trip.status)),
         ],
       ),
     );
