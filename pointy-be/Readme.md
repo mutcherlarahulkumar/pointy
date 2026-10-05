@@ -60,6 +60,8 @@ With `ANTHROPIC_API_KEY` set, `internal/ai` uses Claude (`claude-opus-5-5` by de
 - **Trip summaries**: Insights gets a plain-words summary and one tip, written from pre-formatted numbers (the model never does money arithmetic). Cached per trip until the numbers change.
 - **Deposit assistant**: free-form instructions such as "ask Dev and Meera for 2k by Friday" become a plan for just those people. The model only drafts; the organiser still confirms before anything is sent.
 
+- **Receipt scanning**: `POST /api/receipts/scan` with `{"image_base64": "..."}` (JPEG/PNG, up to 5 MB) returns the total in paise, merchant, date, category and a short description. Nothing is saved; the app fills the expense form and the person checks it. Non-rupee bills and photos that are not receipts are turned away. Answers `503 ai_off` when no key is set.
+
 Requests use structured outputs (JSON schema), low effort, and server-side refusal fallbacks. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
 
 ## PayPal sandbox

@@ -18,6 +18,20 @@ type Assistant interface {
 	// ParseInstruction reads an organiser's request such as "ask Dev and
 	// Meera for 2k each by Friday".
 	ParseInstruction(ctx context.Context, in InstructionInput) (Instruction, error)
+	// ReadReceipt reads a photo of a bill into the fields of an expense.
+	ReadReceipt(ctx context.Context, image []byte, mediaType string) (Receipt, error)
+}
+
+// Receipt is what the model read off a bill. Total stays as text and is
+// parsed into paise by ParseRupees.
+type Receipt struct {
+	IsReceipt   bool   `json:"is_receipt"`
+	Merchant    string `json:"merchant"`
+	Total       string `json:"total"`    // "1840.00"
+	Currency    string `json:"currency"` // "INR"
+	Date        string `json:"date"`     // "2026-10-12" or ""
+	Category    string `json:"category"` // food, stay, transport, other
+	Description string `json:"description"`
 }
 
 // Line is one row of a breakdown, already formatted for the model.

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,5 +122,37 @@ func (c *Claude) ParseInstruction(ctx context.Context, in InstructionInput) (Ins
 			"members":           map[string]any{"type": "array", "items": str},
 			"reply":             str,
 		}, "understood", "per_person_rupees", "due_date", "members", "reply"), &out)
+	return out, err
+}
+
+const receiptSystem = `You read photos of bills and receipts for Pointy, an Indian payments app, so a trip expense can be filled in.
+- is_receipt: false if the photo is not a bill or receipt, or the total cannot be read.
+- merchant: the shop or restaurant name as printed, short.
+- total: the final amount paid including taxes and service charge, as plain digits with optional paise ("1840", "1840.50"). Use the grand total, not a subtotal. "" if unreadable.
+- currency: the ISO code, usually "INR".
+- date: the bill date as YYYY-MM-DD, or "" if not printed.
+- category: food (restaurants, cafes, groceries, drinks), stay (hotels, homestays), transport (cabs, fuel, tickets, rentals, tolls) or other.
+- description: two to five words for the expense list, for example "Dinner at Britto's".
+Never guess numbers you cannot read.`
+
+// ReadReceipt reads a photo of a bill.
+func (c *Claude) ReadReceipt(ctx context.Context, image []byte, mediaType string) (Receipt, error) {
+	var out Receipt
+	err := c.structured(ctx, receiptSystem,
+		[]anthropic.BetaContentBlockParamUnion{
+			anthropic.NewBetaImageBlock(anthropic.BetaBase64ImageSourceParam{
+				Data: base64.StdEncoding.EncodeToString(image), MediaType: anthropic.BetaBase64ImageSourceMediaType(mediaType),
+			}),
+			anthropic.NewBetaTextBlock("Read this bill."),
+		},
+		obj(map[string]any{
+			"is_receipt":  map[string]any{"type": "boolean"},
+			"merchant":    str,
+			"total":       str,
+			"currency":    str,
+			"date":        str,
+			"category":    map[string]any{"type": "string", "enum": []string{"food", "stay", "transport", "other"}},
+			"description": str,
+		}, "is_receipt", "merchant", "total", "currency", "date", "category", "description"), &out)
 	return out, err
 }

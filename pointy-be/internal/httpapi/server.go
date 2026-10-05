@@ -163,6 +163,17 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		return svc.PayPersonal(userID(r), in)
 	})
 
+	// Reads a photo of a bill into expense fields. JSON: {"image_base64": "..."}.
+	authed("POST /api/receipts/scan", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Image []byte `json:"image_base64"` // base64 in JSON, decoded by encoding/json
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, app.MaxReceiptBytes*4/3+4096)).Decode(&in); err != nil {
+			return nil, domain.Invalid("send the photo as image_base64")
+		}
+		return svc.ScanReceipt(r.Context(), in.Image)
+	})
+
 	// ---- requests between people
 	authed("GET /api/money-requests", func(w http.ResponseWriter, r *http.Request) (any, error) { return svc.MoneyRequests(userID(r)), nil })
 	authed("POST /api/money-requests", func(w http.ResponseWriter, r *http.Request) (any, error) {

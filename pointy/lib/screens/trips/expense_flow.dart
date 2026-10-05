@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../api.dart';
 import '../../location.dart';
@@ -104,6 +105,57 @@ class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
   final _amount = TextEditingController();
   final _what = TextEditingController();
   bool _picked = false; // the person chose a category themselves
+  ScannedReceipt? _scanned;
+  bool _scanning = false;
+
+  // Takes or chooses a photo of the bill and fills the form from it. The
+  // person still checks everything before paying.
+  Future<void> _scan(ImageSource source) async {
+    Navigator.of(context).pop(); // the camera / gallery sheet
+    final XFile? photo;
+    try {
+      // A smaller photo uploads faster and is plenty for reading a bill.
+      photo = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+    } catch (e) {
+      if (mounted) showError(context, 'Could not open the ${source == ImageSource.camera ? 'camera' : 'gallery'}');
+      return;
+    }
+    if (photo == null) return;
+    setState(() => _scanning = true);
+    try {
+      final r = await api.scanReceipt(await photo.readAsBytes());
+      if (!mounted) return;
+      setState(() {
+        _scanned = r;
+        _amount.text = paiseToInput(r.amountPaise);
+        _what.text = r.description;
+        _d.payee = r.merchant;
+        if (categories.contains(r.category)) {
+          _d.category = r.category;
+          _picked = true;
+        }
+      });
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
+  }
+
+  void _chooseSource() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take a photo'), onTap: () => _scan(ImageSource.camera)),
+            ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), onTap: () => _scan(ImageSource.gallery)),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -132,7 +184,27 @@ class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => _WhoPaidScreen(d: _d)));
             },
       children: [
-        AmountField(controller: _amount, onChanged: () => setState(() {})),
+        OutlinedButton.icon(
+          onPressed: _scanning ? null : _chooseSource,
+          icon: _scanning
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.document_scanner_outlined),
+          label: Text(_scanning ? 'Reading the receipt…' : 'Scan a receipt'),
+        ),
+        if (_scanned != null) ...[
+          const SizedBox(height: 10),
+          AiCard(
+            title: 'Filled in from your receipt',
+            body: 'Check the amount before you continue.',
+            reasons: [
+              if (_scanned!.merchant.isNotEmpty) _scanned!.merchant,
+              if (_scanned!.date.isNotEmpty) _scanned!.date,
+              categoryLabel(_scanned!.category),
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        AmountField(controller: _amount, onChanged: () => setState(() {}), autofocus: false),
         const SizedBox(height: 16),
         TextField(
           controller: _what,
@@ -141,7 +213,7 @@ class _ExpenseAmountScreenState extends State<ExpenseAmountScreen> {
           decoration: const InputDecoration(labelText: 'Description', hintText: 'Dinner at the beach shack', counterText: ''),
           onChanged: (_) => setState(() {}),
         ),
-        if (guess != null && !_picked) ...[
+        if (guess != null && !_picked && _scanned == null) ...[
           const SizedBox(height: 4),
           AiCard(title: 'Looks like ${categoryLabel(guess.$1)}', reasons: [guess.$2]),
         ],

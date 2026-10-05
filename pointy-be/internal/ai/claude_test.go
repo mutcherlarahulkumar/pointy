@@ -89,3 +89,16 @@ func TestRefusalIsAnError(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestReadReceiptSendsTheImage(t *testing.T) {
+	c, body, _ := fakeAPI(t, "end_turn", `{"is_receipt":true,"merchant":"Britto's","total":"1840","currency":"INR","date":"","category":"food","description":"Dinner"}`)
+	got, err := c.ReadReceipt(context.Background(), []byte{1, 2, 3}, "image/jpeg")
+	if err != nil || got.Total != "1840" || got.Category != "food" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	img := (*body)["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	src := img["source"].(map[string]any)
+	if img["type"] != "image" || src["type"] != "base64" || src["media_type"] != "image/jpeg" || src["data"] != "AQID" {
+		t.Fatalf("image block %v", img)
+	}
+}

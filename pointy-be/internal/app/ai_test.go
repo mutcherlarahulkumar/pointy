@@ -17,6 +17,13 @@ type fakeAI struct {
 	instruction ai.Instruction
 	err         error
 	lastInput   ai.InstructionInput
+	receipt     ai.Receipt
+	gotType     string
+}
+
+func (f *fakeAI) ReadReceipt(_ context.Context, _ []byte, mediaType string) (ai.Receipt, error) {
+	f.gotType = mediaType
+	return f.receipt, f.err
 }
 
 func (f *fakeAI) Summarize(_ context.Context, facts ai.TripFacts) (ai.Summary, error) {
@@ -121,5 +128,36 @@ func TestAssistantFallsBackToRules(t *testing.T) {
 	p := must[*domain.Plan](t)(s.DraftPlan(context.Background(), trip, a, "Collect ₹2,500 from everyone by 20 Oct"))
 	if p.Source != "rules" || p.PerPerson != domain.Rupees(2500) || len(p.Items) != 2 {
 		t.Fatalf("plan %+v", p)
+	}
+}
+
+// A real 1x1 PNG, so content sniffing sees an image.
+var tinyPNG = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89}
+
+func TestScanReceipt(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	if _, err := s.ScanReceipt(context.Background(), tinyPNG); code(err) != "ai_off" {
+		t.Fatalf("without a model: %v", err)
+	}
+	f := &fakeAI{receipt: ai.Receipt{IsReceipt: true, Merchant: "Britto's", Total: "1,840.50", Currency: "INR", Date: "2026-10-12", Category: "food", Description: "Dinner at Britto's"}}
+	s.SetAssistant(f)
+	if _, err := s.ScanReceipt(context.Background(), []byte("not an image at all")); code(err) != "invalid" {
+		t.Fatalf("text upload: %v", err)
+	}
+	r := must[ScannedReceipt](t)(s.ScanReceipt(context.Background(), tinyPNG))
+	if r.Amount != 184050 || r.Category != domain.Food || r.Merchant != "Britto's" || r.Date != "2026-10-12" || f.gotType != "image/png" {
+		t.Fatalf("got %+v (type %s)", r, f.gotType)
+	}
+	f.receipt.Currency = "USD"
+	if _, err := s.ScanReceipt(context.Background(), tinyPNG); code(err) != "invalid" {
+		t.Fatalf("dollar bill: %v", err)
+	}
+	f.receipt = ai.Receipt{IsReceipt: false}
+	if _, err := s.ScanReceipt(context.Background(), tinyPNG); code(err) != "invalid" {
+		t.Fatalf("not a receipt: %v", err)
+	}
+	f.receipt, f.err = ai.Receipt{}, ai.ErrDeclined
+	if _, err := s.ScanReceipt(context.Background(), tinyPNG); code(err) != "invalid" {
+		t.Fatalf("declined: %v", err)
 	}
 }

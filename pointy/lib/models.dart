@@ -635,3 +635,22 @@ class AlertItem {
         at: parseIst(j['at'] as String?),
       );
 }
+
+/// A receipt photo read into the fields of an expense. Nothing is saved
+/// until the person pays.
+class ScannedReceipt {
+  final int amountPaise;
+  final String merchant;
+  final String category;
+  final String description;
+  final String date;
+  ScannedReceipt({required this.amountPaise, required this.merchant, required this.category, required this.description, required this.date});
+
+  factory ScannedReceipt.fromJson(Map<String, dynamic> j) => ScannedReceipt(
+        amountPaise: _int(j['amount_paise']),
+        merchant: _str(j['merchant']),
+        category: _str(j['category']),
+        description: _str(j['description']),
+        date: _str(j['date']),
+      );
+}

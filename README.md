@@ -30,7 +30,7 @@ The backend service needs these environment variables:
 | `PAYPAL_CURRENCY` | `USD` |
 | `POINTY_INR_PER_UNIT` | `85` (rupees per dollar used for conversion) |
 | `PAYPAL_WEBHOOK_ID` | optional |
-| `ANTHROPIC_API_KEY` | optional: turns on Claude-written trip summaries and the free-form deposit assistant |
+| `ANTHROPIC_API_KEY` | optional: turns on Claude-written trip summaries, the free-form deposit assistant and receipt scanning |
 | `POINTY_AI_MODEL` | optional, default `claude-opus-5-5` |
 
 Build command `go build -o bin/server ./cmd/server`, start command `./bin/server`, root directory `pointy-be`, health check `/health`. `POINTY_SEED` and `POINTY_CLOCK` are no longer used.
