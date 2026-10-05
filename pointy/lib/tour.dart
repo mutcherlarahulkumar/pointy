@@ -59,7 +59,7 @@ final homeTour = <TourStep>[
   TourStep(TourKeys.people, Icons.group_rounded, 'Your people', 'Everyone you paid or asked recently. Tap a face to pay them again.'),
   TourStep(TourKeys.alerts, Icons.notifications_rounded, 'Alerts', 'Money in, requests, budget warnings and reminders, newest first.'),
   TourStep(TourKeys.profile, Icons.person_rounded, 'Profile',
-      'Your QR, requests, the fingerprint switch, AI settings, and this tour if you want it again.'),
+      'Your QR, requests, how you confirm payments (PIN or fingerprint), AI settings, and this tour again.'),
   TourStep(TourKeys.trips, Icons.luggage_rounded, 'Trips',
       'A shared wallet for a group. Everyone puts money in, you pay from it, it splits for you, and it settles up at the end.',
       'Each person has their own share in the ledger. A payment first holds everyone\'s part, then posts; if anything fails, nothing is written.'),

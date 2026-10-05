@@ -6,56 +6,70 @@ import 'api.dart';
 import 'theme.dart';
 import 'widgets/pin_pad.dart';
 
+/// How payments are confirmed. The Pointy PIN (set at sign-up) is the
+/// default; the person can switch to fingerprint or face in Profile.
+enum PayCheck { pin, biometric }
+
 /// Asks the person to prove it is them before money leaves their balance or
-/// share: the phone's fingerprint, face or screen lock when it has one,
-/// otherwise their Pointy PIN (checked by the server).
+/// share: every payment, every time.
 class PaymentLock {
-  static const _prefKey = 'pointy.payment_lock';
+  static const _modeKey = 'pointy.pay_check';
 
   /// Tests swap this for one that does not talk to the phone.
   static PaymentLock instance = PaymentLock();
 
   final _auth = LocalAuthentication();
 
-  /// Whether payments ask at all. On unless the person turned it off.
-  Future<bool> isOn() async {
+  /// The chosen check; the PIN unless the person picked fingerprint.
+  Future<PayCheck> mode() async {
     try {
-      return (await SharedPreferences.getInstance()).getBool(_prefKey) ?? true;
+      final v = (await SharedPreferences.getInstance()).getString(_modeKey);
+      return v == 'biometric' ? PayCheck.biometric : PayCheck.pin;
     } catch (_) {
-      return true;
+      return PayCheck.pin;
     }
   }
 
-  Future<void> setOn(bool on) async {
+  Future<void> setMode(PayCheck m) async {
     try {
-      await (await SharedPreferences.getInstance()).setBool(_prefKey, on);
+      await (await SharedPreferences.getInstance()).setString(_modeKey, m.name);
     } catch (_) {}
   }
 
-  /// The phone's own check. Null means the phone cannot do it (no lock set,
-  /// no hardware, or the plugin is missing), so the caller asks for the PIN.
-  Future<bool?> deviceCheck(String reason) async {
+  /// Whether this phone has a fingerprint or face enrolled.
+  Future<bool> canUseBiometrics() async {
     try {
-      if (!await _auth.isDeviceSupported()) return null;
-      return await _auth.authenticate(localizedReason: reason, persistAcrossBackgrounding: true);
-    } on LocalAuthException catch (e) {
-      // The person cancelled: stop. Anything else: fall back to the PIN.
-      if (e.code == LocalAuthExceptionCode.userCanceled || e.code == LocalAuthExceptionCode.systemCanceled) return false;
-      return null;
+      if (!await _auth.isDeviceSupported() || !await _auth.canCheckBiometrics) return false;
+      return (await _auth.getAvailableBiometrics()).isNotEmpty;
     } catch (_) {
-      return null;
+      return false;
+    }
+  }
+
+  /// The fingerprint or face prompt (not the phone's own PIN). True when it
+  /// matched; false when cancelled or not available, so the caller asks for
+  /// the Pointy PIN instead.
+  Future<bool> biometricCheck(String reason) async {
+    try {
+      return await _auth.authenticate(localizedReason: reason, biometricOnly: true, persistAcrossBackgrounding: true);
+    } catch (_) {
+      return false;
     }
   }
 }
 
 /// Call right before a payment. Returns true when the person confirmed it.
-/// [what] reads as "Pay ₹200 to Asha".
+/// [what] reads as "Pay ₹200 to Asha". With fingerprint chosen, a failed or
+/// cancelled scan falls back to the PIN, so nobody is ever locked out.
 Future<bool> confirmPayment(BuildContext context, String what) async {
   final lock = PaymentLock.instance;
-  if (!await lock.isOn()) return true;
-  final device = await lock.deviceCheck(what);
-  if (device != null) return device;
+  if (await lock.mode() == PayCheck.biometric && await lock.biometricCheck(what)) return true;
   if (!context.mounted) return false;
+  return askPin(context, what);
+}
+
+/// Shows the Pointy PIN sheet; true when the server accepted the PIN.
+Future<bool> askPin(BuildContext context, String what) async {
   final ok = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -66,7 +80,7 @@ Future<bool> confirmPayment(BuildContext context, String what) async {
   return ok == true;
 }
 
-/// The Pointy PIN, for phones without a fingerprint or screen lock.
+/// The Pointy PIN sheet: six digits, checked by the server.
 class _PinSheet extends StatefulWidget {
   const _PinSheet({required this.what});
   final String what;
@@ -107,7 +121,8 @@ class _PinSheetState extends State<_PinSheet> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
+      // Scrolls on short screens instead of cutting off the number pad.
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
