@@ -29,6 +29,14 @@ type Client interface {
 	CreateOrder(ctx context.Context, reference string, amount domain.Paise, description string) (Order, error)
 	// CaptureOrder takes the money once the person has approved.
 	CaptureOrder(ctx context.Context, orderID string) error
+	// CreateAuthOrder starts a checkout that only holds the money: after
+	// approval, AuthorizeOrder places the hold, and CaptureAuthorization
+	// takes it or VoidAuthorization lets it go. Group purchases use it so
+	// nobody is charged unless everyone is in.
+	CreateAuthOrder(ctx context.Context, reference string, amount domain.Paise, description string) (Order, error)
+	AuthorizeOrder(ctx context.Context, orderID string) (authID string, err error)
+	CaptureAuthorization(ctx context.Context, authID string) error
+	VoidAuthorization(ctx context.Context, authID string) error
 	// VerifyWebhook checks that a webhook really came from PayPal.
 	VerifyWebhook(ctx context.Context, h http.Header, body []byte) error
 	// SendPayout pays amount from Pointy's business account to the PayPal
@@ -71,6 +79,12 @@ type Mock struct {
 	PayoutFirst string // the status SendPayout answers; SUCCESS when empty
 	PayoutLater string
 	Payouts     []string // emails paid
+	// FailAuthorize and FailCaptureAuth make those calls fail; Captures and
+	// Voids record the authorizations taken and let go.
+	FailAuthorize   bool
+	FailCaptureAuth bool
+	Captures        []string
+	Voids           []string
 }
 
 func (m *Mock) Mode() string { return "mock" }
@@ -115,4 +129,34 @@ func (m *Mock) PayoutStatus(_ context.Context, _ string) (string, error) {
 		return m.PayoutLater, nil
 	}
 	return "SUCCESS", nil
+}
+
+func (m *Mock) CreateAuthOrder(ctx context.Context, ref string, amount domain.Paise, desc string) (Order, error) {
+	return m.CreateOrder(ctx, ref, amount, desc)
+}
+
+func (m *Mock) AuthorizeOrder(_ context.Context, orderID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailAuthorize {
+		return "", fmt.Errorf("mock authorize failure")
+	}
+	return "AUTH-" + orderID, nil
+}
+
+func (m *Mock) CaptureAuthorization(_ context.Context, authID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailCaptureAuth {
+		return fmt.Errorf("mock capture failure")
+	}
+	m.Captures = append(m.Captures, authID)
+	return nil
+}
+
+func (m *Mock) VoidAuthorization(_ context.Context, authID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Voids = append(m.Voids, authID)
+	return nil
 }

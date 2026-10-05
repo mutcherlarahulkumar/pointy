@@ -128,7 +128,7 @@ class _DatesStepState extends State<_DatesStep> {
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
-                  const Icon(Icons.date_range_rounded, color: AppColors.pine700, size: 32),
+                  Icon(Icons.date_range_rounded, color: AppColors.pine700, size: 32),
                   const SizedBox(width: 16),
                   Expanded(
                     child: d == null

@@ -113,6 +113,9 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 	case *domain.Payout:
 		_, err = tx.Exec(ctx, `INSERT INTO payouts (id, user_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
 			v.ID, v.UserID, js(v), v.CreatedAt)
+	case *domain.GroupBuy:
+		_, err = tx.Exec(ctx, `INSERT INTO group_buys (id, trip_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
+			v.ID, v.TripID, js(v), v.CreatedAt)
 	case *domain.ChatMessage:
 		_, err = tx.Exec(ctx, `INSERT INTO chat_messages (id, user_id, body, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, v.ID, v.UserID, js(v), v.At)
 	case domain.ChatCleared:
@@ -311,6 +314,20 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 					return err
 				}
 				s.Payouts = append(s.Payouts, p)
+				return nil
+			})
+		},
+		func() error {
+			return q(`SELECT body FROM group_buys ORDER BY seq`, func(r pgx.Rows) error {
+				var body []byte
+				if err := r.Scan(&body); err != nil {
+					return err
+				}
+				g := &domain.GroupBuy{}
+				if err := json.Unmarshal(body, g); err != nil {
+					return err
+				}
+				s.GroupBuys = append(s.GroupBuys, g)
 				return nil
 			})
 		},

@@ -54,7 +54,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           const SizedBox(height: 16),
           Row(
             children: [
-              const Icon(Icons.lock_outline, color: AppColors.pine700),
+              Icon(Icons.lock_outline, color: AppColors.pine700),
               const SizedBox(width: 8),
               Expanded(
                 child: Text('It never moves money on its own. Every payment and request waits for your tap.',

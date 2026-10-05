@@ -253,7 +253,7 @@ class _TourOverlayState extends State<_TourOverlay> with SingleTickerProviderSta
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.settings_suggest_outlined, size: 18, color: AppColors.pine700),
+                    Icon(Icons.settings_suggest_outlined, size: 18, color: AppColors.pine700),
                     const SizedBox(width: 6),
                     Text('Behind the scenes', style: AppText.detail(color: AppColors.pine700, weight: FontWeight.w700)),
                     Icon(_showBehind ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18, color: AppColors.pine700),
@@ -327,7 +327,7 @@ class _TourOverlayState extends State<_TourOverlay> with SingleTickerProviderSta
           Container(
             width: 64,
             height: 64,
-            decoration: const BoxDecoration(color: AppColors.pine500, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: AppColors.pine500, shape: BoxShape.circle),
             child: const Icon(Icons.check_rounded, color: Colors.white, size: 40),
           ),
           const SizedBox(height: 12),

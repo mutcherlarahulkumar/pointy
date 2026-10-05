@@ -261,3 +261,27 @@ func (g *Groq) ReadReceipt(ctx context.Context, image []byte, mediaType string) 
 		}, "is_receipt", "merchant", "total", "currency", "date", "category", "description"), &out)
 	return out, err
 }
+
+const pickSystem = `You are the shopping agent for a group trip in Pointy, an Indian payments app. The group asked for something; the app found products in online shops.
+Choose up to three candidates the group should buy, best first, using only the candidates given (by index). Prefer products that fit the money (fits_money true), clearly match the request and the trip (place, number of people), and are good value (a was_price means it is on sale).
+For each pick write "why": one short sentence a friend would say, quoting the given prices exactly, for example "Rated for the beach, and ₹425 each for the three of you." Never invent features, ratings or prices.
+"reply" is one sentence to the group about the picks. If nothing fits, return no picks and say why in reply.
+You never buy anything: the group decides. Answer with JSON only.`
+
+// PickProducts chooses products for a group from what the app found.
+func (g *Groq) PickProducts(ctx context.Context, in PickInput) (Picks, error) {
+	data, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		return Picks{}, err
+	}
+	var out Picks
+	err = g.complete(ctx, g.model, pickSystem, string(data), "picks",
+		obj(map[string]any{
+			"picks": map[string]any{"type": "array", "items": obj(map[string]any{
+				"index": map[string]any{"type": "integer"},
+				"why":   str,
+			}, "index", "why")},
+			"reply": str,
+		}, "picks", "reply"), &out)
+	return out, err
+}

@@ -7,7 +7,18 @@ Pay friends, request money, split bills and run shared trip wallets — an Andro
 | `pointy/` | Flutter app ([run and test](pointy/README.md)) |
 | `pointy-be/` | Go backend ([API and PayPal setup](pointy-be/Readme.md)) |
 | `.github/workflows/apk.yml` | Tests everything and publishes the APK on every push |
+| `.github/workflows/reset-db.yml` | Run by hand: empties the database (keeps the schema) and restarts the backend |
 | `render.yaml` | Render blueprint: backend + Postgres |
+
+## Buy together: a group shopping agent on PayPal
+
+Group trips run on "someone pays, then chases everyone". In a Pointy trip, anyone tells the AI agent what the group needs ("a speaker for the beach under 2000"). The agent searches real shops through Channel3, and the AI (Groq) picks up to three products with a one-line reason each. A pick becomes a group purchase split equally over the trip, and it is **all or nothing**:
+
+- Each person says yes with their **trip share** (held in Pointy's ledger) or with **PayPal**: an Orders v2 `AUTHORIZE` order, so the money is only *held* on their PayPal.
+- When the last person says yes, Pointy captures every PayPal authorization and pays from the trip wallet in one ledger entry.
+- One "no", or 48 hours without everyone, calls it off: every authorization is voided and every hold is let go. Nobody pays for something the group did not agree on.
+
+Without any keys the backend uses simulated PayPal and a built-in demo catalogue, so judges can run the whole thing locally (see Development).
 
 ## Get the APK
 
@@ -33,7 +44,7 @@ The backend service needs these environment variables:
 
 For withdrawals, turn on **Payouts** for the sandbox REST app and give the sandbox business account a balance.
 | `GROQ_API_KEY` | optional: turns on AI trip summaries, the free-form deposit assistant, receipt scanning and the Pointy AI assistant (Groq) |
-| `CHANNEL3_API_KEY` | optional: lets Pointy AI find things to buy ("find sunscreen under 1500") through [Channel3](https://trychannel3.com) product search |
+| `CHANNEL3_API_KEY` | optional: real shops for Buy together and Pointy AI ("find sunscreen under 1500") through [Channel3](https://trychannel3.com) product search; without it a small built-in demo catalogue answers |
 | `POINTY_AI_MODEL` | optional, default `openai/gpt-oss-120b` |
 | `POINTY_AI_VISION_MODEL` | optional, model that reads receipt photos, default `meta-llama/llama-4-scout-17b-16e-instruct` |
 
@@ -51,10 +62,20 @@ The server applies pending database migrations when it starts, so nothing extra 
 6. A: **Trips → Plan a trip** with B, ₹3,000 each → the assistant drafts → **Send 1 request**.
 7. B: Trips → the trip → Money in → **You owe ₹3,000** → pay from your balance (add money first if it is short).
 8. B: trip **Overview → Pay from the trip** → ₹1,840 dinner → **Pay someone on Pointy** → A's number → split equally → budget warning → Pay anyway. A's balance goes up by ₹1,840 at once. (Or "I paid already" and the wallet pays B back.)
-9. A: **Close the trip** → what is left goes back to both balances.
-10. A: Profile → **Withdrawal account** → a sandbox personal email, then Home → **Withdraw**. The money goes to PayPal, and from there to the bank.
+9. A: trip **Overview → Buy together** → "A beach speaker" → **Propose to the group** → **Yes from my trip share**. B: the trip shows "Waiting for the group" → open it → **Yes, hold it on my PayPal** → approve on PayPal. As soon as both are in, it is bought (the PayPal hold is captured) and lands in Spent. Try it again and have B say **No thanks**: nothing is charged and A's hold is released.
+10. A: **Close the trip** → what is left goes back to both balances.
+11. A: Profile → **Withdrawal account** → a sandbox personal email, then Home → **Withdraw**. The money goes to PayPal, and from there to the bank.
 
 ## Development
+
+Run everything locally with no accounts or keys (simulated PayPal, demo shop):
+
+```bash
+cd pointy-be && go run ./cmd/server                                   # http://localhost:8080
+cd pointy && flutter run -d chrome --dart-define=API_BASE=http://localhost:8080
+```
+
+Tests:
 
 ```bash
 cd pointy-be && go test ./...

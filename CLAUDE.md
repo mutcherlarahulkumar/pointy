@@ -2,6 +2,8 @@
 
 > **Current state (read first).** Since this brief was written the project changed course; where it disagrees with the sections below, this note wins.
 > - **Money flow:** Pointy is a wallet. PayPal only at the edges (US sandbox business account, USD shown in rupees): **Add money** by Orders API checkout, **Withdraw** by Payouts to the person's PayPal (then their bank). Everything else is a ledger entry: paying a Pointy user, requests, splits, trip deposits from balance, trip payments to a Pointy user (`member`) or back to you (`reimburse`), settle-up into balances. No invoices, no UPI QR.
+> - **Buy together:** a trip's AI shopping agent (Channel3 or the built-in demo catalogue, Groq picks with reasons) proposes a group purchase; each member says yes from their trip share (ledger hold) or PayPal (Orders `AUTHORIZE`); paid only when all are in (captures), voided on any no or after 48 h. See `internal/app/groupbuy.go`.
+> - **App:** payment-done animation themed by category; app colour (Pine green / Ocean blue) in Profile.
 > - **Trips UI:** tabs Overview (wallet, three actions, people), Money in, Spent, Budget. Screens stay short: one line of help per step, no repeated data.
 > - **Accounts:** phone + 6-digit PIN, bearer tokens. The `X-User-Id` header and demo users are gone; there is no seed data and the clock is real (IST).
 > - **Storage:** Postgres via `DATABASE_URL` (`internal/store`), in-memory working copy, every change saved in one transaction. One instance per database.

@@ -59,6 +59,7 @@ type Service struct {
 	moneyRequests []*domain.MoneyRequest
 	chats         map[string][]*domain.ChatMessage // user id -> conversation with the AI
 	payouts       []*domain.Payout                 // money paid out to PayPal accounts
+	groupBuys     []*domain.GroupBuy               // purchases a trip's agent found, bought together
 	// holds is money set aside while a PayPal payout is being sent, so it
 	// cannot be spent twice in the meantime. Never stored: a payout either
 	// finishes (and is posted) or is released.
@@ -67,6 +68,7 @@ type Service struct {
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
 	shop        Shopper                  // optional product search (Channel3)
+	searches    map[string]*agentSearch  // shopping agent answers, by search id
 	aiSummaries map[string]cachedSummary // trip id -> last AI summary
 }
 

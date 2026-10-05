@@ -38,7 +38,7 @@ class WalletCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine100, size: 18),
+                  Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine100, size: 18),
                   const SizedBox(width: 8),
                   Expanded(child: Text(title, style: AppText.detail(color: AppColors.pine100, weight: FontWeight.w600))),
                   if (subtitle != null) Text(subtitle!, style: AppText.small(color: AppColors.pine100)),
@@ -49,7 +49,7 @@ class WalletCard extends StatelessWidget {
               Text('in the trip wallet', style: AppText.detail(color: AppColors.pine100)),
               if (footer != null) ...[
                 const SizedBox(height: 16),
-                const DashedLine(color: AppColors.pine500),
+                DashedLine(color: AppColors.pine500),
                 const SizedBox(height: 12),
                 DefaultTextStyle(style: AppText.detail(color: Colors.white), child: footer!),
               ],

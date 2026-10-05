@@ -4,12 +4,15 @@ import '../theme.dart';
 
 /// An icon on a soft pine square, used in lists and action rows.
 class TileIcon extends StatelessWidget {
-  const TileIcon(this.icon, {super.key, this.size = 40, this.background = AppColors.pine100, this.color = AppColors.pine700});
+  const TileIcon(this.icon, {super.key, this.size = 40, Color? background, Color? color})
+      : _background = background,
+        _color = color;
 
   final IconData icon;
   final double size;
-  final Color background;
-  final Color color;
+  final Color? _background, _color;
+  Color get background => _background ?? AppColors.pine100;
+  Color get color => _color ?? AppColors.pine700;
 
   @override
   Widget build(BuildContext context) {

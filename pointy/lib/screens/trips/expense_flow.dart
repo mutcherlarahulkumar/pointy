@@ -523,6 +523,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
           },
           amount: formatPaise(e.amountPaise),
           subtitle: '${e.description} · from the ${d.trip.name} wallet',
+          category: e.category,
           rows: [
             ('Category', categoryLabel(e.category)),
             ('Split', e.isEvenSplit && e.shares.isNotEmpty ? '${e.shares.length} ways, ${formatPaise(e.shares.first.amountPaise)} each' : '${e.shares.length} people'),

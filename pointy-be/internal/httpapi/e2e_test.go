@@ -35,7 +35,7 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, payouts, trips, users, schema_migrations CASCADE`)
+		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, payouts, group_buys, trips, users, schema_migrations CASCADE`)
 		conn.Close(ctx)
 		if err != nil {
 			t.Fatal(err)

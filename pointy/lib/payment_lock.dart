@@ -129,7 +129,7 @@ class _PinSheetState extends State<_PinSheet> {
           children: [
             Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
-            const Icon(Icons.lock_outline_rounded, color: AppColors.pine700, size: 32),
+            Icon(Icons.lock_outline_rounded, color: AppColors.pine700, size: 32),
             const SizedBox(height: 8),
             Text('Enter your PIN', style: AppText.title()),
             const SizedBox(height: 4),

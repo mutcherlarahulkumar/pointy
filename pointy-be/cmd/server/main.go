@@ -65,6 +65,11 @@ func main() {
 		sh.BaseURL = env("CHANNEL3_BASE_URL", shop.DefaultBaseURL)
 		svc.SetShopper(sh)
 		log.Print("shopping on (Channel3)")
+	} else {
+		// Without a key the shopping agent uses a small built-in catalogue,
+		// so the whole app can be tried with no accounts at all.
+		svc.SetShopper(shop.Demo{})
+		log.Print("shopping on (built-in demo catalogue; set CHANNEL3_API_KEY for real shops)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	if err := svc.Load(ctx); err != nil {

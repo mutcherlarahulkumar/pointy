@@ -1,0 +1,77 @@
+# Empties the production database so Pointy starts fresh: every table is
+# truncated except schema_migrations, so the schema stays and nothing has
+# to be migrated again. Run it by hand: Actions → Reset database → Run
+# workflow, and type TRUNCATE to confirm.
+#
+# Settings (repository Settings → Secrets and variables → Actions):
+#   secret DATABASE_URL             the External Database URL of the Render
+#                                   Postgres (the internal one only works
+#                                   inside Render)
+#   secret RENDER_DEPLOY_HOOK_URL   optional: the backend's Deploy Hook (Render
+#                                   → the service → Settings → Deploy Hook).
+#                                   The server keeps a working copy in memory,
+#                                   so it must restart to forget the old data;
+#                                   without the hook, restart it by hand.
+name: Reset database
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type TRUNCATE to delete every user, payment, trip and message"
+        required: true
+
+concurrency:
+  group: reset-db
+
+jobs:
+  truncate:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'TRUNCATE' }}
+    steps:
+      - name: Check the secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Add the DATABASE_URL secret (Render's External Database URL) first."
+            exit 1
+          fi
+
+      - name: Truncate every table but schema_migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE tables text;
+          BEGIN
+            SELECT string_agg(format('%I.%I', schemaname, tablename), ', ')
+              INTO tables
+              FROM pg_tables
+             WHERE schemaname = 'public' AND tablename <> 'schema_migrations';
+            IF tables IS NOT NULL THEN
+              EXECUTE 'TRUNCATE ' || tables || ' RESTART IDENTITY CASCADE';
+              RAISE NOTICE 'Truncated: %', tables;
+            END IF;
+          END $$;
+          SQL
+
+      - name: Restart the backend
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::No RENDER_DEPLOY_HOOK_URL secret: restart the backend on Render by hand, or it keeps showing the old data from memory."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "Asked Render to restart the backend."
+
+  refused:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm != 'TRUNCATE' }}
+    steps:
+      - run: |
+          echo "::error::Nothing was deleted. Type TRUNCATE exactly to confirm."
+          exit 1

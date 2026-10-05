@@ -4,6 +4,7 @@ import '../../api.dart';
 import '../../models.dart';
 import '../../payment_lock.dart';
 import '../../session.dart';
+import '../../look.dart';
 import '../../theme.dart';
 import '../../tour.dart';
 import '../../widgets/async_view.dart';
@@ -55,6 +56,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (ok == true) await Session.signOut();
   }
 
+  // Two swatches; the app redraws in the chosen colour at once.
+  Future<void> _pickColour() async {
+    final picked = await showModalBottomSheet<AppPalette>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('App colour', style: AppText.heading()),
+              const SizedBox(height: 4),
+              Text('Buttons, the trip wallet and highlights use it.', style: AppText.detail()),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  for (final p in AppPalette.all) ...[
+                    if (p != AppPalette.all.first) const SizedBox(width: 12),
+                    Expanded(child: _Swatch(palette: p, on: p.id == AppColors.palette.id, onTap: () => Navigator.pop(c, p))),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked != null && picked.id != AppColors.palette.id) await AppLook.use(picked);
+  }
+
   @override
   Widget build(BuildContext context) {
     void go(Widget s) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => s));
@@ -99,6 +132,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _loadCheck();
               },
             ),
+            tile(Icons.palette_outlined, 'App colour', AppColors.palette.name, _pickColour),
             tile(Icons.tune_rounded, 'What the AI may use', 'Choose what suggestions can look at', () => go(const AiSettingsScreen())),
             tile(Icons.explore_outlined, 'Take the tour', 'What each part of the app does, step by step', () => startTour(context)),
             tile(Icons.info_outline_rounded, 'How Pointy works in India', 'Where PayPal fits in', () => go(const HowItWorksScreen())),
@@ -112,6 +146,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onPressed: _signOut,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({required this.palette, required this.on, required this.onTap});
+
+  final AppPalette palette;
+  final bool on;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: palette.c100,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: on ? palette.c700 : Colors.transparent, width: 2),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                for (final c in [palette.c900, palette.c700, palette.c500]) ...[
+                  Container(width: 22, height: 22, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+                  const SizedBox(width: 4),
+                ],
+                const Spacer(),
+                if (on) Icon(Icons.check_circle_rounded, color: palette.c700),
+              ]),
+              const SizedBox(height: 10),
+              Text(palette.name, style: AppText.body(weight: FontWeight.w700, color: palette.c900)),
+            ],
+          ),
         ),
       ),
     );

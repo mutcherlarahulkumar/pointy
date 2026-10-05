@@ -150,7 +150,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
           SurfaceCard(
             padding: EdgeInsets.zero,
             child: ListTile(
-              leading: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine700),
+              leading: Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine700),
               title: Text('Your Pointy balance', style: AppText.body(weight: FontWeight.w600)),
               subtitle: Text(balance == null ? 'Loading…' : '${formatPaise(balance)} available · instant', style: AppText.detail()),
             ),

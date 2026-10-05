@@ -104,13 +104,27 @@ func (s *Sandbox) call(ctx context.Context, method, path, requestID string, in, 
 type link struct{ Href, Rel string }
 
 func (s *Sandbox) CreateOrder(ctx context.Context, reference string, amount domain.Paise, description string) (Order, error) {
+	return s.createOrder(ctx, "CAPTURE", reference, amount, description)
+}
+
+// CreateAuthOrder is CreateOrder with intent AUTHORIZE: after approval the
+// money is only held on the payer's account until it is captured or voided.
+func (s *Sandbox) CreateAuthOrder(ctx context.Context, reference string, amount domain.Paise, description string) (Order, error) {
+	return s.createOrder(ctx, "AUTHORIZE", reference, amount, description)
+}
+
+func (s *Sandbox) createOrder(ctx context.Context, intent, reference string, amount domain.Paise, description string) (Order, error) {
+	action := "PAY_NOW"
+	if intent == "AUTHORIZE" {
+		action = "CONTINUE"
+	}
 	in := map[string]any{
-		"intent": "CAPTURE",
+		"intent": intent,
 		"purchase_units": []any{map[string]any{
 			"reference_id": reference, "description": description, "amount": s.money(amount),
 		}},
 		"payment_source": map[string]any{"paypal": map[string]any{"experience_context": map[string]any{
-			"return_url": s.ReturnURL, "cancel_url": s.CancelURL, "user_action": "PAY_NOW",
+			"return_url": s.ReturnURL, "cancel_url": s.CancelURL, "user_action": action,
 		}}},
 	}
 	var out struct {
@@ -141,6 +155,62 @@ func (s *Sandbox) CaptureOrder(ctx context.Context, orderID string) error {
 	}
 	if out.Status != "COMPLETED" {
 		return fmt.Errorf("paypal: order %s is %s, not COMPLETED", orderID, out.Status)
+	}
+	return nil
+}
+
+// AuthorizeOrder places the hold on an approved AUTHORIZE order and
+// returns the authorization id.
+func (s *Sandbox) AuthorizeOrder(ctx context.Context, orderID string) (string, error) {
+	var out struct {
+		Status        string
+		PurchaseUnits []struct {
+			Payments struct {
+				Authorizations []struct{ ID, Status string }
+			}
+		} `json:"purchase_units"`
+	}
+	if err := s.call(ctx, http.MethodPost, "/v2/checkout/orders/"+orderID+"/authorize", "authorize-"+orderID, struct{}{}, &out); err != nil {
+		// Authorized before (a retry): read the order for the id.
+		if !strings.Contains(err.Error(), "ORDER_ALREADY_AUTHORIZED") {
+			return "", err
+		}
+		if err := s.call(ctx, http.MethodGet, "/v2/checkout/orders/"+orderID, "", nil, &out); err != nil {
+			return "", err
+		}
+	}
+	for _, pu := range out.PurchaseUnits {
+		for _, a := range pu.Payments.Authorizations {
+			if a.ID != "" {
+				return a.ID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("paypal: order %s has no authorization (status %s)", orderID, out.Status)
+}
+
+// CaptureAuthorization takes held money.
+func (s *Sandbox) CaptureAuthorization(ctx context.Context, authID string) error {
+	var out struct{ Status string }
+	if err := s.call(ctx, http.MethodPost, "/v2/payments/authorizations/"+authID+"/capture", "capture-"+authID, map[string]any{"final_capture": true}, &out); err != nil {
+		if strings.Contains(err.Error(), "AUTHORIZATION_ALREADY_CAPTURED") {
+			return nil
+		}
+		return err
+	}
+	if out.Status != "COMPLETED" && out.Status != "PENDING" {
+		return fmt.Errorf("paypal: capture of %s is %s", authID, out.Status)
+	}
+	return nil
+}
+
+// VoidAuthorization lets held money go without charging it.
+func (s *Sandbox) VoidAuthorization(ctx context.Context, authID string) error {
+	if err := s.call(ctx, http.MethodPost, "/v2/payments/authorizations/"+authID+"/void", "void-"+authID, nil, nil); err != nil {
+		if strings.Contains(err.Error(), "PREVIOUSLY_VOIDED") || strings.Contains(err.Error(), "AUTHORIZATION_VOIDED") {
+			return nil
+		}
+		return err
 	}
 	return nil
 }

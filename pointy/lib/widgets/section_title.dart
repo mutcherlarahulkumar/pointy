@@ -38,11 +38,12 @@ class SurfaceCard extends StatelessWidget {
 
 /// A thin progress bar on a mist track.
 class Bar extends StatelessWidget {
-  const Bar({super.key, required this.fraction, this.color = AppColors.pine500, this.extra = 0, this.extraColor});
+  const Bar({super.key, required this.fraction, Color? color, this.extra = 0, this.extraColor}) : _color = color;
 
   /// 0..1 of the bar filled with [color].
   final double fraction;
-  final Color color;
+  final Color? _color;
+  Color get color => _color ?? AppColors.pine500;
 
   /// A second part drawn after the first, for "this payment" on the budget check.
   final double extra;
