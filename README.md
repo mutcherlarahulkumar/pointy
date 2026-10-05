@@ -20,6 +20,18 @@ Group trips run on "someone pays, then chases everyone". In a Pointy trip, anyon
 
 Without any keys the backend uses simulated PayPal and a built-in demo catalogue, so judges can run the whole thing locally (see Development).
 
+## Pointy Parenting
+
+A parent looks after a child's Pointy wallet: daily and monthly limits, every payment visible, and anything over a limit approved by the parent, either on the parent's own phone (with their PIN) or, when they are together, with a one-time code from the parent's app. Each child has their own code key, so a parent with several children never mixes them up (RFC 6238 TOTP, 30 seconds, used once).
+
+Built around Indian rules:
+
+- **Consent from both phones (DPDP Act 2023, s.9(1)).** The parent accepts the terms and confirms with their PIN; the child types the pairing code from the parent's phone and their own PIN. Neither phone alone can turn an account into a child account, an adult's date of birth is refused, and at 18 the account graduates by itself. The consent record (terms version, times) is stored; unlinking withdraws it.
+- **No tracking or profiling of children (s.9(3)).** No AI suggestions from time and place, no location kept with payments, no trips or shopping agent on child accounts.
+- **Small-wallet limits (RBI PPI Master Direction).** At most ₹2,000 a payment, ₹10,000 received a month, ₹10,000 held. No PayPal top-up or withdrawal for children (PayPal is for adults); the parent sends pocket money.
+
+The child's phone shows a separate, simpler app: pocket money, what is left today and this month, Pay, Scan, Ask a parent, and the latest payments.
+
 ## Get the APK
 
 Every push builds the app. Download the latest:
@@ -64,7 +76,8 @@ The server applies pending database migrations when it starts, so nothing extra 
 8. B: trip **Overview → Pay from the trip** → ₹1,840 dinner → **Pay someone on Pointy** → A's number → split equally → budget warning → Pay anyway. A's balance goes up by ₹1,840 at once. (Or "I paid already" and the wallet pays B back.)
 9. A: trip **Overview → Buy together** → "A beach speaker" → **Propose to the group** → **Yes from my trip share**. B: the trip shows "Waiting for the group" → open it → **Yes, hold it on my PayPal** → approve on PayPal. As soon as both are in, it is bought (the PayPal hold is captured) and lands in Spent. Try it again and have B say **No thanks**: nothing is charged and A's hold is released.
 10. A: **Close the trip** → what is left goes back to both balances.
-11. A: Profile → **Withdrawal account** → a sandbox personal email, then Home → **Withdraw**. The money goes to PayPal, and from there to the bank.
+11. Parenting: B (the child) and A (the parent) on two phones. A: Profile → **Family** → **Add a child** → accept the terms → B's number and a date of birth under 18 → limits → PIN. A's phone shows a 6-digit code. B: the Home banner (or Profile → Family) → **See what changes** → type the code → own PIN. Both phones celebrate, and B's phone switches to the child app. A: **Pocket money** ₹500. B: pay A ₹250 → over the daily limit → **Ask on their phone**; A approves with the PIN. Or A opens **Approval code** and B types it.
+12. A: Profile → **Withdrawal account** → a sandbox personal email, then Home → **Withdraw**. The money goes to PayPal, and from there to the bank.
 
 ## Development
 
