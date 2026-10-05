@@ -25,7 +25,7 @@ String defaultBaseUrl() {
   const fromDefine = String.fromEnvironment('API_BASE');
   if (fromDefine.isNotEmpty) return fromDefine;
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8080';
-  return 'http://localhost:8080';
+  return 'https://pointy-ceoi.onrender.com';
 }
 
 /// Makes a fresh Idempotency-Key. Make one per payment attempt and reuse it
