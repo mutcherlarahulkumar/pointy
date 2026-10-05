@@ -1,93 +1,93 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:pointy/api.dart';
 import 'package:pointy/main.dart';
-import 'package:pointy/models.dart';
-import 'package:pointy/prefs.dart';
-import 'package:pointy/screens/pay/pay_draft.dart';
-import 'package:pointy/screens/pay/review.dart';
+import 'package:pointy/screens/auth/phone.dart';
+import 'package:pointy/screens/history/history.dart';
+import 'package:pointy/screens/money/requests.dart';
+import 'package:pointy/session.dart';
 import 'package:pointy/theme.dart';
 
 import 'fakes.dart';
 
+Widget app(Widget home) => MaterialApp(theme: buildTheme(), home: home);
+
 void main() {
   setUp(() {
     AppText.useGoogleFonts = false;
-    AiPrefs.location = false;
     api = fakeApi();
   });
 
-  testWidgets('shows the five bottom bar items', (tester) async {
+  // A phone-sized screen, so lists build the rows a phone would show.
+  void phoneScreen(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.7;
+    addTearDown(tester.view.reset);
+  }
+
+  testWidgets('signed out, the app opens on the welcome screen', (tester) async {
+    Session.signedIn.value = false;
     await tester.pumpWidget(const PointyApp());
-    for (final label in ['Home', 'Trips', 'Scan', 'Insights', 'History']) {
+    expect(find.text('Get started'), findsOneWidget);
+  });
+
+  testWidgets('signed in, home shows the balance, actions and people', (tester) async {
+    phoneScreen(tester);
+    Session.signedIn.value = true;
+    await tester.pumpWidget(const PointyApp());
+    await tester.pumpAndSettle();
+    expect(find.text('₹3,630'), findsOneWidget);
+    for (final label in ['Add money', 'My QR', 'Pay', 'Request', 'Split bill']) {
       expect(find.text(label), findsWidgets);
     }
+    expect(find.text('Dev'), findsOneWidget); // recent people
+    expect(find.text('7'), findsOneWidget); // unread alerts badge
+    // Home stops its refresh timer when it goes away.
+    await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('home shows the personal balance and one AI suggestion', (tester) async {
-    await tester.pumpWidget(const PointyApp());
+  testWidgets('the phone step only continues with a valid Indian mobile number', (tester) async {
+    final sent = <http.Request>[];
+    api = fakeApi(log: sent, overrides: {'POST /api/auth/check-phone': (201, '{"phone":"9876543210","exists":false}')});
+    await tester.pumpWidget(app(const PhoneScreen()));
+    await tester.enterText(find.byType(TextField), '5876543210');
+    await tester.pump();
+    expect(find.text('Indian mobile numbers start with 6, 7, 8 or 9'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.pump();
+    await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('₹8,430'), findsOneWidget);
-    expect(find.textContaining('Dinner with your Goa trip group'), findsOneWidget);
-    expect(find.text('Restaurant nearby'), findsOneWidget);
-    // Home is for your own money: no trip wallet card here.
-    expect(find.text('in the trip wallet'), findsNothing);
+    expect(sent.single.url.path, '/api/auth/check-phone');
+    expect(find.text('What should friends call you?'), findsOneWidget);
   });
 
-  testWidgets('trips tab shows the active trip as a wallet card', (tester) async {
-    await tester.pumpWidget(const PointyApp());
+  testWidgets('history tags every movement Trip or Personal', (tester) async {
+    await tester.pumpWidget(app(const HistoryScreen(standalone: true)));
     await tester.pumpAndSettle();
+    expect(find.text('Refund from Goa trip'), findsOneWidget);
+    expect(find.text('Trip'), findsWidgets);
+    expect(find.text('Personal'), findsWidgets);
     await tester.tap(find.text('Trips'));
     await tester.pumpAndSettle();
-    expect(find.text('Goa trip'), findsOneWidget);
-    expect(find.text('₹12,192'), findsOneWidget);
-    expect(find.text('Day 2 of 5'), findsOneWidget);
+    expect(find.text('Refund from Goa trip'), findsNothing); // a refund lands in your personal balance
   });
 
-  testWidgets('history tags every payment', (tester) async {
-    await tester.pumpWidget(const PointyApp());
+  testWidgets('requests are split into to pay and sent', (tester) async {
+    phoneScreen(tester);
+    await tester.pumpWidget(app(const RequestsScreen()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('History'));
+    expect(find.text('Dev Mehta asked you'), findsOneWidget);
+    await tester.tap(find.text('Sent'));
     await tester.pumpAndSettle();
-    expect(find.text('Dinner, beach shack'), findsOneWidget);
-    expect(find.text('Trip'), findsWidgets);
+    expect(find.text('You asked Dev Mehta'), findsOneWidget);
   });
 
-  testWidgets('a budget warning opens the budget check, and Pay anyway resends with a new key', (tester) async {
-    final sent = <http.Request>[];
-    var calls = 0;
-    api = fakeApi(log: sent, overrides: {'POST /api/trips/t_goa/expenses': (409, fixture('budget_warning'))});
-    final trip = Trip.fromJson(jsonDecode(fixture('trips_t_goa')) as Map<String, dynamic>);
-    final me = Me.fromJson(jsonDecode(fixture('me')) as Map<String, dynamic>);
-    final draft = PayDraft()
-      ..me = me
-      ..trip = trip
-      ..wallet = 'trip'
-      ..payeeName = 'Beach shack, Baga'
-      ..payeeEmail = 'shack@example.com'
-      ..amountPaise = 184000
-      ..description = 'Dinner'
-      ..category = 'food';
-    draft.participants.addAll(trip.members);
-
-    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: ReviewScreen(draft: draft)));
-    expect(find.text('₹460'), findsWidgets); // each person's part
-    await tester.tap(find.text('Pay ₹1,840'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('This takes Food to 85%'), findsOneWidget);
-    expect(find.text('₹752'), findsOneWidget); // left after
-    calls = sent.where((r) => r.url.path.endsWith('/expenses')).length;
-    expect(calls, 1);
-
-    await tester.tap(find.text('Pay anyway'));
-    await tester.pumpAndSettle();
-    final posts = sent.where((r) => r.url.path.endsWith('/expenses')).toList();
-    expect(posts.length, 2);
-    expect(jsonDecode(posts[1].body)['confirm_over_budget'], true);
-    expect(posts[1].headers['Idempotency-Key'], isNot(posts[0].headers['Idempotency-Key']));
+  testWidgets('a signed_out answer from the server signs the phone out', (tester) async {
+    api = fakeApi(overrides: {'GET /api/me': (401, '{"error":{"code":"signed_out","message":"please sign in again"}}')});
+    var called = false;
+    api.onSignedOut = () => called = true;
+    await expectLater(api.me(), throwsA(isA<ApiException>()));
+    expect(called, isTrue);
   });
 }

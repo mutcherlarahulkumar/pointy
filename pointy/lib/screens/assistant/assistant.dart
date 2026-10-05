@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../api.dart';
 import '../../dates.dart';
-import '../../models.dart';
 import '../../money.dart';
+import '../../models.dart';
 import '../../theme.dart';
+import '../../widgets/avatar.dart';
 import '../../widgets/tag.dart';
 
 /// The trip assistant. The organiser types an instruction, the assistant
@@ -24,36 +25,53 @@ class _Message {
   final bool fromMe;
   final String? text;
   final Plan? plan;
-  _Message.me(this.text) : fromMe = true, plan = null;
-  _Message.bot(this.text) : fromMe = false, plan = null;
-  _Message.plan(this.plan) : fromMe = false, text = null;
+  _Message.me(this.text)
+      : fromMe = true,
+        plan = null;
+  _Message.bot(this.text)
+      : fromMe = false,
+        plan = null;
+  _Message.plan(this.plan)
+      : fromMe = false,
+        text = null;
 }
 
 class _AssistantScreenState extends State<AssistantScreen> {
   late final TextEditingController _input = TextEditingController(text: widget.initialInstruction ?? '');
+  final _scroll = ScrollController();
   final List<_Message> _messages = [];
   bool _busy = false;
   String? _confirmingPlanId;
 
-  List<String> get _quickPrompts => [
-        'Collect ${formatPaise(widget.trip.depositTargetPaise)} from everyone by ${formatDay(widget.trip.start.subtract(const Duration(days: 2)))}',
-        'Ask everyone for ₹2,000 more',
-        'Collect ₹1,000 by ${formatDay(widget.trip.end)}',
-      ];
+  List<String> get _quickPrompts {
+    final due = widget.trip.start.subtract(const Duration(days: 2));
+    final dueText = due.isAfter(DateTime.now()) ? ' by ${formatDay(due)}' : '';
+    return [
+      if (widget.trip.depositTargetPaise > 0) 'Collect ${formatPaise(widget.trip.depositTargetPaise)} from everyone$dueText',
+      'Ask everyone for ₹2,000$dueText',
+      'Collect ₹1,000 each',
+    ];
+  }
 
   @override
   void initState() {
     super.initState();
     _messages.add(_Message.bot(
-      'Tell me how much to collect and by when. I will draft the requests and wait for your OK before sending anything.',
+      'Hi! Tell me how much to collect and by when, like “Collect ₹3,000 from everyone by 20 Oct”. '
+      'I draft a request for each person and wait for your OK before sending anything.',
     ));
   }
 
   @override
   void dispose() {
     _input.dispose();
+    _scroll.dispose();
     super.dispose();
   }
+
+  void _toEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      });
 
   Future<void> _ask(String text) async {
     if (text.trim().isEmpty || _busy) return;
@@ -62,13 +80,15 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _input.clear();
       _busy = true;
     });
+    _toEnd();
     try {
       final plan = await api.draftPlan(widget.trip.id, text.trim());
       setState(() => _messages.add(_Message.plan(plan)));
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.message)));
+      setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
+      _toEnd();
     }
   }
 
@@ -79,38 +99,41 @@ class _AssistantScreenState extends State<AssistantScreen> {
       final sent = await api.confirmPlan(widget.trip.id, plan.id, key: 'confirm-${plan.id}');
       setState(() {
         final i = _messages.indexWhere((m) => m.plan?.id == plan.id);
-        if (i >= 0) _messages[i] = _Message.plan(_withStatus(plan, 'confirmed'));
-        _messages.add(_Message.bot(sent.isEmpty
-            ? 'Nothing new to send: everyone already has a request or has paid.'
-            : 'Sent ${sent.length} PayPal request${sent.length == 1 ? '' : 's'}. '
-                'I will show who has paid on the Deposits tab.'));
+        if (i >= 0) _messages[i] = _Message.plan(plan.withStatus('confirmed'));
+        _messages.add(_Message.bot(sent == 0
+            ? 'Nothing new to send: everyone has already paid.'
+            : 'Sent $sent request${sent == 1 ? '' : 's'}. Each person sees it on their phone and can pay from their balance or with PayPal. '
+                'I mark them paid as the money comes in.'));
       });
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.message)));
+      setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _confirmingPlanId = null);
+      _toEnd();
     }
   }
-
-  Plan _withStatus(Plan p, String status) => Plan(
-        id: p.id,
-        tripId: p.tripId,
-        instruction: p.instruction,
-        perPersonPaise: p.perPersonPaise,
-        due: p.due,
-        items: p.items,
-        totalPaise: p.totalPaise,
-        status: status,
-      );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.trip.name} assistant')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(color: AppColors.amber500, borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.auto_awesome, size: 16, color: AppColors.amber900),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text('${widget.trip.name} assistant', overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
             child: ListView(
+              controller: _scroll,
               padding: const EdgeInsets.all(16),
               children: [
                 for (final m in _messages) m.plan != null ? _planCard(m.plan!) : _bubble(m),
@@ -125,10 +148,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
                 for (final p in _quickPrompts)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ActionChip(label: Text(p), onPressed: () => _ask(p)),
-                  ),
+                  Padding(padding: const EdgeInsets.only(right: 8), child: ActionChip(label: Text(p), onPressed: () => _ask(p))),
               ],
             ),
           ),
@@ -141,6 +161,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   Expanded(
                     child: TextField(
                       controller: _input,
+                      textCapitalization: TextCapitalization.sentences,
                       decoration: const InputDecoration(hintText: 'Tell the assistant what to collect'),
                       onSubmitted: _ask,
                     ),
@@ -164,12 +185,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
     return Align(
       alignment: m.fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         constraints: const BoxConstraints(maxWidth: 300),
         decoration: BoxDecoration(
           color: m.fromMe ? AppColors.pine700 : AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(m.fromMe ? 18 : 4),
+            bottomRight: Radius.circular(m.fromMe ? 4 : 18),
+          ),
         ),
         child: Text(m.text!, style: AppText.body(color: m.fromMe ? Colors.white : AppColors.ink)),
       ),
@@ -179,9 +205,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Widget _planCard(Plan p) {
     final waiting = p.status == 'draft';
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.amber100, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(color: AppColors.amber100, borderRadius: BorderRadius.circular(18)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -194,18 +220,25 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ],
           ),
           const SizedBox(height: 6),
-          Text('${formatPaise(p.perPersonPaise)} each by ${formatWeekday(p.due)}',
-              style: AppText.detail(color: AppColors.amber900)),
-          const SizedBox(height: 8),
+          Text('${formatPaise(p.perPersonPaise)} each by ${formatWeekday(p.due)}', style: AppText.detail(color: AppColors.amber900)),
+          const SizedBox(height: 10),
           for (final it in p.items)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
                 children: [
-                  Expanded(child: Text(it.name, style: AppText.body(color: AppColors.amber900))),
-                  Text(_channel(it), style: AppText.small(color: AppColors.amber900)),
+                  Avatar(it.name, size: 28),
                   const SizedBox(width: 8),
-                  Text(formatPaise(it.amountPaise), style: AppText.body(color: AppColors.amber900, weight: FontWeight.w600)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(it.name, style: AppText.body(color: AppColors.amber900, weight: FontWeight.w600)),
+                        Text(_channel(it), style: AppText.small(color: AppColors.amber900)),
+                      ],
+                    ),
+                  ),
+                  Text(formatPaise(it.amountPaise), style: AppText.body(color: AppColors.amber900, weight: FontWeight.w700)),
                 ],
               ),
             ),
@@ -217,10 +250,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
               onPressed: _confirmingPlanId != null || p.requestCount == 0 ? null : () => _confirm(p),
               child: Text(p.requestCount == 0 ? 'Nothing to send' : 'Send ${p.requestCount} request${p.requestCount == 1 ? '' : 's'}'),
             ),
-            TextButton(
-              onPressed: () => setState(() => _input.text = p.instruction),
-              child: const Text('Edit plan'),
-            ),
+            TextButton(onPressed: () => setState(() => _input.text = p.instruction), child: const Text('Edit plan')),
           ],
         ],
       ),
@@ -229,7 +259,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   String _channel(PlanItem it) => switch (it.channel) {
         'already_paid' => 'Already paid',
-        'in_app' => 'You, in the app',
-        _ => 'PayPal request',
+        'organiser' => 'You · add it from the Wallet tab',
+        _ => 'Gets a request on their phone',
       };
 }

@@ -1,6 +1,13 @@
-// Package app holds the use cases. It keeps its state in memory behind one
-// mutex, which is enough for a demo; a database-backed store can replace the
-// maps without changing the HTTP layer.
+// Package app holds the use cases. It keeps a working copy of the state in
+// memory behind one mutex and writes every change through to a Store
+// (Postgres in production) before answering, so a restart loses nothing.
+// Run one instance per database: the in-memory copy is not shared.
+//
+// Money model: PayPal is used only to bring money in (checkout). Each
+// person has a personal balance and a share in every trip they are on; all
+// payments, splits, requests and refunds move money between those inside
+// one double-entry ledger, which works in India where PayPal cannot pay
+// between Indian accounts.
 package app
 
 import (
@@ -16,46 +23,66 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
 )
 
-type (
-	Paise = domain.Paise
-)
+type Paise = domain.Paise
 
 // LowShare is the level below which a member is told to top up.
 const LowShare = Paise(100000) // ₹1,000
 
-type Service struct {
-	mu  sync.Mutex
-	now func() time.Time
-	pp  paypal.Client
+// MaxAmount caps one payment or top-up, to catch typos.
+const MaxAmount = Paise(10000000) // ₹1,00,000
 
-	ledger    *domain.Ledger
-	holds     map[string]Paise // money reserved while PayPal is being called
-	users     map[string]*domain.User
-	trips     map[string]*domain.Trip
-	tripOrder []string
-	deposits  map[string]*domain.Deposit // keyed by PayPal order id
-	expenses  []*domain.Expense
-	requests  map[string]*domain.DepositRequest
-	reqOrder  []string
-	plans     map[string]*domain.Plan
-	alerts    []*domain.Alert
-	seq       int
+// IST is India Standard Time. Times are shown and bucketed in it.
+var IST = time.FixedZone("IST", 5*3600+1800)
+
+type Service struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	pp    paypal.Client
+	store Store
+
+	pending       []any             // objects changed by the operation in progress
+	sessions      map[string]string // token hash -> user id
+	phones        map[string]string // phone -> user id
+	failedLogins  map[string][]time.Time
+	ledger        *domain.Ledger
+	users         map[string]*domain.User
+	trips         map[string]*domain.Trip
+	tripOrder     []string
+	deposits      map[string]*domain.Deposit // keyed by PayPal order id
+	expenses      []*domain.Expense
+	requests      map[string]*domain.DepositRequest
+	reqOrder      []string
+	plans         map[string]*domain.Plan
+	alerts        []*domain.Alert
+	moneyRequests []*domain.MoneyRequest
 }
 
-func New(pp paypal.Client, now func() time.Time) *Service {
+// New makes a service with no state. Call Load to read what store holds;
+// a nil store keeps everything in memory only.
+func New(pp paypal.Client, now func() time.Time, store Store) *Service {
+	if store == nil {
+		store = MemoryStore{}
+	}
 	return &Service{
-		now: now, pp: pp, ledger: &domain.Ledger{}, holds: map[string]Paise{},
+		now: now, pp: pp, store: store, ledger: &domain.Ledger{},
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
-		plans: map[string]*domain.Plan{},
+		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
+		failedLogins: map[string][]time.Time{},
 	}
 }
 
 // Functions ending in L expect s.mu to be held by the caller.
 
-func (s *Service) idL(prefix string) string {
-	s.seq++
-	return fmt.Sprintf("%s_%04d", prefix, s.seq)
+func (s *Service) idL(prefix string) string { return newID(prefix) }
+
+// postL writes a journal entry to the ledger and marks it for saving.
+func (s *Service) postL(e domain.Entry) error {
+	if err := s.ledger.Post(e); err != nil {
+		return err
+	}
+	s.track(e)
+	return nil
 }
 
 func rail(err error) *domain.Error {
@@ -85,7 +112,26 @@ func (s *Service) openTripL(tripID, userID string) (*domain.Trip, error) {
 }
 
 func (s *Service) alertL(tripID, userID, kind, title, body string) {
-	s.alerts = append(s.alerts, &domain.Alert{ID: s.idL("al"), TripID: tripID, UserID: userID, Kind: kind, Title: title, Body: body, At: s.now()})
+	a := &domain.Alert{ID: s.idL("al"), TripID: tripID, UserID: userID, Kind: kind, Title: title, Body: body, At: s.now()}
+	s.alerts = append(s.alerts, a)
+	s.track(a)
+}
+
+func (s *Service) name(userID string) string {
+	if u, ok := s.users[userID]; ok {
+		return u.Name
+	}
+	return "Someone"
+}
+
+func checkAmount(a Paise) error {
+	if a <= 0 {
+		return domain.Invalid("amount must be more than zero")
+	}
+	if a > MaxAmount {
+		return domain.Invalid("amount is over the %s limit", INR(MaxAmount))
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- me
@@ -94,6 +140,8 @@ type Me struct {
 	User            *domain.User `json:"user"`
 	PersonalBalance Paise        `json:"personal_balance_paise"`
 	ActiveTripID    string       `json:"active_trip_id,omitempty"`
+	UnreadAlerts    int          `json:"unread_alerts"`
+	OpenRequests    int          `json:"open_requests"` // money people are asking you for
 	PayPalMode      string       `json:"paypal_mode"`
 	Now             time.Time    `json:"now"`
 }
@@ -109,26 +157,68 @@ func (s *Service) Me(userID string) (Me, error) {
 	if t := s.activeTripL(userID, s.now()); t != nil {
 		m.ActiveTripID = t.ID
 	}
+	for _, a := range s.alertsForL(userID) {
+		if a.At.After(u.AlertsSeenAt) {
+			m.UnreadAlerts++
+		}
+	}
+	for _, r := range s.moneyRequests {
+		if r.PayerID == userID && r.Status == "open" {
+			m.OpenRequests++
+		}
+	}
+	for _, r := range s.requests {
+		if r.UserID == userID && r.Status == "open" {
+			m.OpenRequests++
+		}
+	}
 	return m, nil
 }
 
+// activeTripL is the open trip happening now, or else the open trip that
+// starts soonest, so a trip being planned still counts.
 func (s *Service) activeTripL(userID string, at time.Time) *domain.Trip {
+	var next *domain.Trip
 	for _, id := range s.tripOrder {
 		t := s.trips[id]
-		if t.Status == domain.TripOpen && t.HasMember(userID) && !at.Before(t.Start) && at.Before(t.End.Add(24*time.Hour)) {
+		if t.Status != domain.TripOpen || !t.HasMember(userID) {
+			continue
+		}
+		if !at.Before(t.Start) && at.Before(t.End.Add(24*time.Hour)) {
 			return t
 		}
+		if t.Start.After(at) && (next == nil || t.Start.Before(next.Start)) {
+			next = t
+		}
+	}
+	return next
+}
+
+// currentTripL is the open trip happening right now, if any.
+func (s *Service) currentTripL(userID string, at time.Time) *domain.Trip {
+	if t := s.activeTripL(userID, at); t != nil && !at.Before(t.Start) {
+		return t
 	}
 	return nil
+}
+
+// HandleWebhook maps a verified PayPal event onto the same use case the app
+// calls: an approved checkout is captured.
+func (s *Service) HandleWebhook(ctx context.Context, eventType, resourceID string) error {
+	if eventType == "CHECKOUT.ORDER.APPROVED" {
+		_, err := s.CaptureDeposit(ctx, resourceID)
+		return err
+	}
+	return nil // other events are acknowledged and ignored
 }
 
 // ---------------------------------------------------------------- trips
 
 type MemberView struct {
-	User      *domain.User `json:"user"`
-	Deposited Paise        `json:"deposited_paise"`
-	Used      Paise        `json:"used_paise"`
-	Left      Paise        `json:"left_paise"`
+	User      domain.PublicUser `json:"user"`
+	Deposited Paise             `json:"deposited_paise"`
+	Used      Paise             `json:"used_paise"`
+	Left      Paise             `json:"left_paise"`
 }
 
 type TripView struct {
@@ -149,7 +239,7 @@ func (s *Service) tripViewL(t *domain.Trip) TripView {
 		acc := domain.ShareAccount(t.ID, uid)
 		_, dep := s.ledger.Totals(acc, "deposit")
 		used, _ := s.ledger.Totals(acc, "spend")
-		m := MemberView{User: s.users[uid], Deposited: dep, Used: used, Left: s.ledger.Owed(acc)}
+		m := MemberView{User: s.users[uid].Public(), Deposited: dep, Used: used, Left: s.ledger.Owed(acc)}
 		v.MemberDetails = append(v.MemberDetails, m)
 		v.Deposited += dep
 		v.Spent += used
@@ -162,8 +252,8 @@ func (s *Service) ListTrips(userID string) []TripView {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []TripView{}
-	for _, id := range s.tripOrder {
-		if t := s.trips[id]; t.HasMember(userID) {
+	for i := len(s.tripOrder) - 1; i >= 0; i-- {
+		if t := s.trips[s.tripOrder[i]]; t.HasMember(userID) {
 			out = append(out, s.tripViewL(t))
 		}
 	}
@@ -193,8 +283,9 @@ type CreateTripInput struct {
 func (s *Service) CreateTrip(userID string, in CreateTripInput) (TripView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if strings.TrimSpace(in.Name) == "" || in.Start.IsZero() || in.End.Before(in.Start) || in.DepositTarget < 0 {
-		return TripView{}, domain.Invalid("a trip needs a name, a start, an end on or after the start, and a deposit that is not negative")
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" || in.Start.IsZero() || in.End.Before(in.Start) || in.DepositTarget < 0 || in.DepositTarget > MaxAmount {
+		return TripView{}, domain.Invalid("a trip needs a name, a start, an end on or after the start, and a sensible deposit")
 	}
 	members := []string{userID}
 	for _, m := range in.Members {
@@ -212,10 +303,48 @@ func (s *Service) CreateTrip(userID string, in CreateTripInput) (TripView, error
 		}
 		budgets[c] = v
 	}
-	t := &domain.Trip{ID: s.idL("trip"), Name: in.Name, Place: in.Place, Start: in.Start, End: in.End, OrganiserID: userID,
+	t := &domain.Trip{ID: s.idL("trip"), Name: in.Name, Place: strings.TrimSpace(in.Place), Start: in.Start, End: in.End, OrganiserID: userID,
 		Members: members, DepositTarget: in.DepositTarget, Budgets: budgets, Status: domain.TripOpen, CreatedAt: s.now()}
 	s.trips[t.ID] = t
 	s.tripOrder = append(s.tripOrder, t.ID)
+	s.track(t)
+	for _, m := range members[1:] {
+		body := "Open the trip to see the plan"
+		if t.DepositTarget > 0 {
+			body = "Everyone puts in " + INR(t.DepositTarget)
+		}
+		s.alertL(t.ID, m, "trip", s.name(userID)+" added you to "+t.Name, body)
+	}
+	if err := s.commitL(); err != nil {
+		return TripView{}, err
+	}
+	return s.tripViewL(t), nil
+}
+
+// AddMembers lets the organiser bring more people onto an open trip.
+func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, err := s.openTripL(tripID, userID)
+	if err != nil {
+		return TripView{}, err
+	}
+	if t.OrganiserID != userID {
+		return TripView{}, domain.Forbidden("only the organiser can add people")
+	}
+	for _, m := range ids {
+		if _, ok := s.users[m]; !ok {
+			return TripView{}, domain.Invalid("unknown member %q", m)
+		}
+		if !t.HasMember(m) {
+			t.Members = append(t.Members, m)
+			s.alertL(t.ID, m, "trip", s.name(userID)+" added you to "+t.Name, "Open the trip to see the plan")
+		}
+	}
+	s.track(t)
+	if err := s.commitL(); err != nil {
+		return TripView{}, err
+	}
 	return s.tripViewL(t), nil
 }
 
@@ -228,36 +357,64 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// ---------------------------------------------------------------- deposits
+// ---------------------------------------------------------------- money in (PayPal checkout)
 
-// StartDeposit creates the PayPal order. No money has moved yet.
+// StartTopUp creates a PayPal order to add money to the person's own balance.
+func (s *Service) StartTopUp(ctx context.Context, userID string, amount Paise) (*domain.Deposit, error) {
+	if err := checkAmount(amount); err != nil {
+		return nil, err
+	}
+	return s.startOrder(ctx, "", userID, amount, "Pointy balance top-up")
+}
+
+// StartDeposit creates a PayPal order to add money to a trip share.
 func (s *Service) StartDeposit(ctx context.Context, tripID, userID string, amount Paise) (*domain.Deposit, error) {
 	s.mu.Lock()
 	t, err := s.openTripL(tripID, userID)
-	if err == nil && amount <= 0 {
-		err = domain.Invalid("amount must be more than zero")
-	}
-	var id, name string
 	if err == nil {
-		id, name = s.idL("dep"), t.Name
+		err = checkAmount(amount)
+	}
+	name := ""
+	if t != nil {
+		name = t.Name
 	}
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	o, perr := s.pp.CreateOrder(ctx, id, amount, "Deposit for "+name)
+	return s.startOrder(ctx, tripID, userID, amount, "Deposit for "+name)
+}
+
+func (s *Service) startOrder(ctx context.Context, tripID, userID string, amount Paise, what string) (*domain.Deposit, error) {
+	id := s.idL("dep")
+	o, perr := s.pp.CreateOrder(ctx, id, amount, what)
 	if perr != nil {
 		return nil, rail(perr)
 	}
-	d := &domain.Deposit{ID: id, TripID: tripID, UserID: userID, Amount: amount, OrderID: o.ID, ApproveURL: o.ApproveURL, Status: "created", CreatedAt: s.now()}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := &domain.Deposit{ID: id, TripID: tripID, UserID: userID, Amount: amount, OrderID: o.ID, ApproveURL: o.ApproveURL, Status: "created", CreatedAt: s.now()}
 	s.deposits[o.ID] = d
-	s.mu.Unlock()
+	s.track(d)
+	if err := s.commitL(); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
-// CaptureDeposit takes the money and credits the member's share. Calling it
-// twice for the same order credits only once.
+// Deposit returns one PayPal order the person started.
+func (s *Service) Deposit(orderID, userID string) (*domain.Deposit, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.deposits[orderID]
+	if !ok || (userID != "" && d.UserID != userID) {
+		return nil, domain.NotFound("deposit")
+	}
+	return d, nil
+}
+
+// CaptureDeposit takes the money once the person approved on PayPal and
+// credits their balance or trip share. Calling it twice credits once.
 func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.Deposit, error) {
 	s.mu.Lock()
 	d, ok := s.deposits[orderID]
@@ -270,7 +427,7 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		if d.Status == "captured" {
 			return d, nil
 		}
-		return nil, domain.Conflict("capture_in_progress", "this deposit is already being captured", nil)
+		return nil, domain.Conflict("capture_in_progress", "this payment is already being completed", nil)
 	}
 	d.Status = "capturing"
 	s.mu.Unlock()
@@ -281,31 +438,114 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 	defer s.mu.Unlock()
 	if perr != nil {
 		d.Status = "created"
-		return nil, rail(perr)
+		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", map[string]any{"paypal": perr.Error()})
 	}
-	if err := s.creditShareL(d.TripID, d.UserID, d.Amount, d.OrderID, s.now()); err != nil {
+	var err error
+	if d.TripID == "" {
+		err = s.postL(domain.Entry{ID: s.idL("je"), Kind: "topup", Ref: d.OrderID, At: s.now(), Postings: []domain.Posting{
+			{Account: domain.PersonalClearing, Debit: d.Amount}, {Account: domain.PersonalAccount(d.UserID), Credit: d.Amount},
+		}})
+	} else {
+		err = s.postL(domain.Entry{ID: s.idL("je"), Kind: "deposit", TripID: d.TripID, Ref: d.OrderID, At: s.now(), Postings: []domain.Posting{
+			{Account: domain.ClearingAccount(d.TripID), Debit: d.Amount}, {Account: domain.ShareAccount(d.TripID, d.UserID), Credit: d.Amount},
+		}})
+	}
+	if err != nil {
+		d.Status = "created"
 		return nil, err
 	}
 	d.Status = "captured"
-	s.alertL(d.TripID, "", "deposit", s.users[d.UserID].Name+" added "+INR(d.Amount), "The trip wallet now holds "+INR(s.ledger.Held(domain.ClearingAccount(d.TripID))))
+	s.track(d)
+	if d.TripID == "" {
+		s.alertL("", d.UserID, "money", "Added "+INR(d.Amount)+" to your balance", "Paid with PayPal")
+	} else {
+		t := s.trips[d.TripID]
+		s.alertL(d.TripID, "", "deposit", s.name(d.UserID)+" added "+INR(d.Amount), "The "+t.Name+" wallet now holds "+INR(s.ledger.Held(domain.ClearingAccount(d.TripID))))
+		s.closeRequestsL(d.TripID, d.UserID, d.Amount, "paypal")
+	}
+	if err := s.commitL(); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
-func (s *Service) creditShareL(tripID, userID string, amount Paise, ref string, at time.Time) error {
-	return s.ledger.Post(domain.Entry{ID: s.idL("je"), Kind: "deposit", TripID: tripID, Ref: ref, At: at, Postings: []domain.Posting{
-		{Account: domain.ClearingAccount(tripID), Debit: amount},
-		{Account: domain.ShareAccount(tripID, userID), Credit: amount},
+// DepositFromBalance moves money from the person's balance into their trip
+// share. No PayPal call: both sit in Pointy's account already.
+func (s *Service) DepositFromBalance(tripID, userID string, amount Paise) (TripView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, err := s.openTripL(tripID, userID)
+	if err == nil {
+		err = checkAmount(amount)
+	}
+	if err != nil {
+		return TripView{}, err
+	}
+	if err := s.balanceToTripL(t, userID, amount, "balance"); err != nil {
+		return TripView{}, err
+	}
+	s.alertL(tripID, "", "deposit", s.name(userID)+" added "+INR(amount), "The "+t.Name+" wallet now holds "+INR(s.ledger.Held(domain.ClearingAccount(tripID))))
+	s.closeRequestsL(tripID, userID, amount, "balance")
+	if err := s.commitL(); err != nil {
+		return TripView{}, err
+	}
+	return s.tripViewL(t), nil
+}
+
+// balanceToTripL debits the personal balance and credits the trip share,
+// moving the backing money between the two PayPal pools in the same entry.
+func (s *Service) balanceToTripL(t *domain.Trip, userID string, amount Paise, ref string) error {
+	acc := domain.PersonalAccount(userID)
+	if s.ledger.Owed(acc) < amount {
+		return domain.Conflict("insufficient_balance", "your balance is "+INR(s.ledger.Owed(acc))+"; add money first", map[string]any{"balance_paise": s.ledger.Owed(acc)})
+	}
+	return s.postL(domain.Entry{ID: s.idL("je"), Kind: "deposit", TripID: t.ID, Ref: ref, At: s.now(), Postings: []domain.Posting{
+		{Account: acc, Debit: amount},
+		{Account: domain.ShareAccount(t.ID, userID), Credit: amount},
+		{Account: domain.ClearingAccount(t.ID), Debit: amount},
+		{Account: domain.PersonalClearing, Credit: amount},
 	}})
+}
+
+// tripToBalancesL pays out of a trip into people's personal balances: each
+// share in debits is reduced, each person in credits receives money.
+func (s *Service) tripToBalancesL(t *domain.Trip, kind, ref string, at time.Time, debits, credits map[string]Paise) error {
+	var total Paise
+	ps := []domain.Posting{}
+	for _, uid := range t.Members {
+		if a := debits[uid]; a > 0 {
+			ps = append(ps, domain.Posting{Account: domain.ShareAccount(t.ID, uid), Debit: a})
+			total += a
+		}
+	}
+	var in Paise
+	ids := make([]string, 0, len(credits))
+	for uid := range credits {
+		ids = append(ids, uid)
+	}
+	sort.Strings(ids)
+	for _, uid := range ids {
+		if a := credits[uid]; a > 0 {
+			ps = append(ps, domain.Posting{Account: domain.PersonalAccount(uid), Credit: a})
+			in += a
+		}
+	}
+	if in != total {
+		return fmt.Errorf("trip payout does not balance: %d out, %d in", total, in)
+	}
+	ps = append(ps, domain.Posting{Account: domain.PersonalClearing, Debit: total}, domain.Posting{Account: domain.ClearingAccount(t.ID), Credit: total})
+	return s.postL(domain.Entry{ID: s.idL("je"), Kind: kind, TripID: t.ID, Ref: ref, At: at, Postings: ps})
 }
 
 // ---------------------------------------------------------------- history and alerts
 
 type HistoryItem struct {
-	Kind      string          `json:"kind"`   // payment, deposit, refund
+	Kind      string          `json:"kind"`   // payment, received, deposit, topup, refund
 	Wallet    string          `json:"wallet"` // trip, personal
 	TripID    string          `json:"trip_id,omitempty"`
 	TripName  string          `json:"trip_name,omitempty"`
 	Title     string          `json:"title"`
+	Subtitle  string          `json:"subtitle,omitempty"`
 	Category  domain.Category `json:"category,omitempty"`
 	Amount    Paise           `json:"amount_paise"`
 	YourPart  Paise           `json:"your_part_paise"`
@@ -325,27 +565,58 @@ func (s *Service) History(userID string) []HistoryItem {
 				part, mine = sh.Amount, true
 			}
 		}
-		if !mine {
-			continue
+		if mine {
+			h := HistoryItem{Kind: "payment", Wallet: "personal", Title: e.Description, Subtitle: "To " + e.Payee, Category: e.Category, Amount: e.Amount, YourPart: part, PlaceName: e.PlaceName, At: e.At}
+			if e.TripID != "" {
+				h.Wallet, h.TripID, h.TripName = "trip", e.TripID, s.trips[e.TripID].Name
+			}
+			out = append(out, h)
 		}
-		h := HistoryItem{Kind: "payment", Wallet: "personal", Title: e.Description, Category: e.Category, Amount: e.Amount, YourPart: part, PlaceName: e.PlaceName, At: e.At}
-		if e.TripID != "" {
-			h.Wallet, h.TripID, h.TripName = "trip", e.TripID, s.trips[e.TripID].Name
+		if e.PayeeUserID == userID {
+			h := HistoryItem{Kind: "received", Wallet: "personal", Title: e.Description, Subtitle: "From " + s.name(e.PaidBy), Category: e.Category, Amount: e.Amount, YourPart: e.Amount, At: e.At}
+			if e.TripID != "" {
+				h.Subtitle = "From the " + s.trips[e.TripID].Name + " wallet"
+				h.TripID, h.TripName = e.TripID, s.trips[e.TripID].Name
+			}
+			out = append(out, h)
 		}
-		out = append(out, h)
 	}
 	for _, e := range s.ledger.Entries() {
-		if e.Kind != "deposit" && e.Kind != "refund" {
-			continue
-		}
-		for _, p := range e.Postings {
-			if e.TripID != "" && p.Account == domain.ShareAccount(e.TripID, userID) {
-				amt, title := p.Credit, "Added to "+s.trips[e.TripID].Name
-				if e.Kind == "refund" {
-					amt, title = p.Debit, "Refund from "+s.trips[e.TripID].Name
+		switch e.Kind {
+		case "topup":
+			for _, p := range e.Postings {
+				if p.Account == domain.PersonalAccount(userID) {
+					out = append(out, HistoryItem{Kind: "topup", Wallet: "personal", Title: "Added money", Subtitle: "With PayPal", Amount: p.Credit, YourPart: p.Credit, At: e.At})
 				}
-				out = append(out, HistoryItem{Kind: e.Kind, Wallet: "trip", TripID: e.TripID, TripName: s.trips[e.TripID].Name, Title: title, Amount: amt, YourPart: amt, At: e.At})
 			}
+		case "deposit", "refund":
+			for _, p := range e.Postings {
+				if p.Account != domain.ShareAccount(e.TripID, userID) {
+					continue
+				}
+				name := s.trips[e.TripID].Name
+				if e.Kind == "deposit" {
+					sub := "With PayPal"
+					if e.Ref == "balance" {
+						sub = "From your balance"
+					}
+					out = append(out, HistoryItem{Kind: "deposit", Wallet: "trip", TripID: e.TripID, TripName: name, Title: "Added to " + name, Subtitle: sub, Amount: p.Credit, YourPart: p.Credit, At: e.At})
+				} else {
+					out = append(out, HistoryItem{Kind: "refund", Wallet: "personal", TripID: e.TripID, TripName: name, Title: "Refund from " + name, Subtitle: "Into your balance", Amount: p.Debit, YourPart: p.Debit, At: e.At})
+				}
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	return out
+}
+
+func (s *Service) alertsForL(userID string) []*domain.Alert {
+	out := []*domain.Alert{}
+	for i := len(s.alerts) - 1; i >= 0; i-- {
+		a := s.alerts[i]
+		if a.UserID == userID || (a.UserID == "" && a.TripID != "" && s.trips[a.TripID] != nil && s.trips[a.TripID].HasMember(userID)) {
+			out = append(out, a)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
@@ -355,15 +626,20 @@ func (s *Service) History(userID string) []HistoryItem {
 func (s *Service) Alerts(userID string) []*domain.Alert {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []*domain.Alert{}
-	for i := len(s.alerts) - 1; i >= 0; i-- {
-		a := s.alerts[i]
-		if a.UserID == userID || (a.UserID == "" && a.TripID != "" && s.trips[a.TripID].HasMember(userID)) {
-			out = append(out, a)
-		}
+	return s.alertsForL(userID)
+}
+
+// MarkAlertsSeen clears the unread badge.
+func (s *Service) MarkAlertsSeen(userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[userID]
+	if !ok {
+		return domain.NotFound("user")
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
-	return out
+	u.AlertsSeenAt = s.now()
+	s.track(u)
+	return s.commitL()
 }
 
 // INR formats paise the Indian way: ₹1,20,000 or ₹460.50.

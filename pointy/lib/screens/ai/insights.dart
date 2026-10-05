@@ -58,7 +58,7 @@ class _TripInsightsState extends State<_TripInsights> {
     if (tripId.isEmpty) {
       final trips = await api.trips();
       if (trips.isEmpty) return null;
-      tripId = trips.last.id;
+      tripId = trips.first.id; // newest first
     }
     return (await api.trip(tripId), await api.insights(tripId));
   }
@@ -81,7 +81,7 @@ class _TripInsightsState extends State<_TripInsights> {
             Totals(spentPaise: i.spentPaise, eachPaise: i.perPersonPaise, leftPaise: i.leftPaise),
             BreakdownSection('By category', i.byCategory, labels: categoryLabel),
             BreakdownSection('By time of day', i.byTimeOfDay, labels: categoryLabel),
-            BreakdownSection('By place', i.byPlace),
+            BreakdownSection('By place', [for (final b in i.byPlace) if (b.key.isNotEmpty && b.key != 'Unknown place') b]),
             BreakdownSection('By person', i.byPerson),
           ],
         );

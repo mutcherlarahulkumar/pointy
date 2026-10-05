@@ -18,7 +18,7 @@ type Posting struct {
 
 type Entry struct {
 	ID       string    `json:"id"`
-	Kind     string    `json:"kind"` // deposit, spend, refund
+	Kind     string    `json:"kind"` // deposit, spend, refund, topup, transfer, withdrawal
 	TripID   string    `json:"trip_id,omitempty"`
 	Ref      string    `json:"ref"`
 	At       time.Time `json:"at"`
@@ -56,6 +56,9 @@ func (l *Ledger) Post(e Entry) error {
 }
 
 func (l *Ledger) Entries() []Entry { return l.entries }
+
+// Load replaces the entries with ones read from storage, in posting order.
+func (l *Ledger) Load(entries []Entry) { l.entries = entries }
 
 // Totals returns the debits and credits posted to an account, optionally for
 // one kind of entry only (pass "" for all kinds).

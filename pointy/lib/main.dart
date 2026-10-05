@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
 import 'screens/ai/insights.dart';
+import 'screens/auth/welcome.dart';
 import 'screens/history/history.dart';
 import 'screens/home/home.dart';
 import 'screens/pay/scan.dart';
 import 'screens/trips/trips.dart';
+import 'session.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Session.restore();
   runApp(const PointyApp());
 }
 
@@ -20,7 +24,12 @@ class PointyApp extends StatelessWidget {
       title: 'Pointy',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
-      home: const MainShell(),
+      navigatorKey: Session.navigatorKey,
+      // Signed in: the app. Signed out: the welcome screen.
+      home: ValueListenableBuilder<bool>(
+        valueListenable: Session.signedIn,
+        builder: (context, signedIn, _) => signedIn ? const MainShell() : const WelcomeScreen(),
+      ),
     );
   }
 }
@@ -39,7 +48,7 @@ class _MainShellState extends State<MainShell> {
   // A tab is built fresh each time it is opened, so it always shows the
   // latest numbers from the server.
   Widget _tab() => switch (_index) {
-        0 => const HomeScreen(),
+        0 => HomeScreen(onOpenTrips: () => setState(() => _index = 1)),
         1 => const TripsScreen(),
         2 => const InsightsScreen(),
         _ => const HistoryScreen(),
@@ -63,16 +72,19 @@ class _MainShellState extends State<MainShell> {
         shape: const CircularNotchedRectangle(),
         notchMargin: 6,
         padding: EdgeInsets.zero,
+        height: 64,
         child: Row(
           children: [
-            _item(0, Icons.home_outlined, 'Home'),
-            _item(1, Icons.luggage_outlined, 'Trips'),
-            Expanded(child: Center(child: Padding(
-              padding: const EdgeInsets.only(top: 30),
-              child: Text('Scan', style: AppText.small()),
-            ))),
-            _item(2, Icons.insights_outlined, 'Insights'),
-            _item(3, Icons.receipt_long_outlined, 'History'),
+            _item(0, Icons.home_rounded, 'Home'),
+            _item(1, Icons.luggage_rounded, 'Trips'),
+            Expanded(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(padding: const EdgeInsets.only(bottom: 10), child: Text('Scan', style: AppText.small())),
+              ),
+            ),
+            _item(2, Icons.insights_rounded, 'Insights'),
+            _item(3, Icons.receipt_long_rounded, 'History'),
           ],
         ),
       ),
@@ -88,7 +100,12 @@ class _MainShellState extends State<MainShell> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+              decoration: BoxDecoration(color: active ? AppColors.pine100 : Colors.transparent, borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: color),
+            ),
             const SizedBox(height: 2),
             Text(label, style: AppText.small(color: color, weight: active ? FontWeight.w700 : FontWeight.w500)),
           ],

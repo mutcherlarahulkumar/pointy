@@ -1,1 +1,0 @@
-{"error":{"code":"budget_warning","message":"this payment takes the food budget to 85%. Send it again with confirm_over_budget to pay anyway","details":{"category":"food","limit_paise":500000,"used_paise":240800,"after_paise":424800,"left_after_paise":75200,"percent_before":48,"percent_after":85,"crosses_80":true,"over_100":false,"warn":true}}}

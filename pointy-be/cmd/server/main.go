@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -10,12 +11,16 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/config"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/httpapi"
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/store"
 )
 
 var env = config.Env
 
 func main() {
 	config.LoadDotEnv(".env")
+
+	// PayPal: the sandbox when keys are set, otherwise a mock that approves
+	// every payment at once (fine for trying the app, never for real money).
 	var pp paypal.Client = &paypal.Mock{}
 	if env("PAYPAL_MODE", "mock") == "sandbox" {
 		sb, err := config.Sandbox()
@@ -25,19 +30,30 @@ func main() {
 		pp = sb
 	}
 
-	// With the demo clock the server believes it is Tuesday 13 Oct 2026,
-	// 8:42 pm, so the seeded trip is on day 2 exactly as in the designs.
-	now := time.Now
-	if env("POINTY_CLOCK", "demo") == "demo" {
-		now = func() time.Time { return app.DemoNow }
-	}
-	svc := app.New(pp, now)
-	if env("POINTY_SEED", "true") == "true" {
-		app.SeedDemo(svc)
+	// Storage: Postgres when DATABASE_URL is set, otherwise memory only.
+	var st app.Store = app.MemoryStore{}
+	if url := env("DATABASE_URL", ""); url != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		pg, err := store.Open(ctx, url)
+		cancel()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer pg.Close()
+		st = pg
+	} else {
+		log.Print("WARNING: DATABASE_URL is not set; everything is lost when the server stops")
 	}
 
+	svc := app.New(pp, func() time.Time { return time.Now().In(app.IST) }, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	if err := svc.Load(ctx); err != nil {
+		log.Fatal(err)
+	}
+	cancel()
+
 	addr := ":" + env("PORT", "8080")
-	srv := &http.Server{Addr: addr, Handler: httpapi.New(svc, pp, pp.Mode() == "mock"), ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("pointy-be listening on %s (paypal: %s, clock: %s)", addr, pp.Mode(), env("POINTY_CLOCK", "demo"))
+	srv := &http.Server{Addr: addr, Handler: httpapi.New(svc, pp), ReadHeaderTimeout: 10 * time.Second}
+	log.Printf("pointy-be listening on %s (paypal: %s, public url: %s)", addr, pp.Mode(), config.PublicURL())
 	log.Fatal(srv.ListenAndServe())
 }

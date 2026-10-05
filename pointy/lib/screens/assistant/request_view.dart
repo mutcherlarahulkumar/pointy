@@ -1,103 +1,115 @@
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../api.dart';
 import '../../dates.dart';
-import '../../models.dart';
 import '../../money.dart';
+import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/avatar.dart';
+import '../../widgets/section_title.dart';
+import '../../widgets/success.dart';
 import '../../widgets/tag.dart';
+import '../money/top_up.dart';
 
-/// What a member sees for a deposit request: the amount, the due date, a
-/// QR code of the PayPal pay link, and "Pay with PayPal".
+/// A member's view of the deposit the organiser asked them for: how much,
+/// by when, and two ways to pay it.
 class RequestViewScreen extends StatefulWidget {
-  const RequestViewScreen({super.key, required this.trip, required this.request, required this.isMock});
+  const RequestViewScreen({super.key, required this.trip, required this.request});
 
   final Trip trip;
   final DepositRequest request;
-
-  /// In mock mode there is no real PayPal invoice, so a demo button marks
-  /// the request as paid instead.
-  final bool isMock;
 
   @override
   State<RequestViewScreen> createState() => _RequestViewScreenState();
 }
 
 class _RequestViewScreenState extends State<RequestViewScreen> {
-  late DepositRequest _r = widget.request;
+  late Future<(Me, DepositRequest)> _data = _load();
+
+  // The latest balance and request status, so the screen updates after
+  // paying with PayPal.
+  Future<(Me, DepositRequest)> _load() async {
+    final me = await api.me();
+    final all = await api.requests(widget.trip.id);
+    return (me, all.firstWhere((r) => r.id == widget.request.id, orElse: () => widget.request));
+  }
+  final _key = newIdempotencyKey();
   bool _busy = false;
 
-  Future<void> _markPaid() async {
+  Future<void> _payFromBalance() async {
     setState(() => _busy = true);
     try {
-      final r = await api.demoMarkPaid(_r.id);
-      setState(() => _r = r);
+      final r = await api.payDepositRequest(widget.request.id, key: _key);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(
+        builder: (_) => SuccessScreen(
+          title: 'Deposit paid',
+          amount: formatPaise(r.amountPaise),
+          subtitle: 'to your share of ${widget.trip.name}',
+          rows: const [('Paid from', 'Your Pointy balance')],
+        ),
+      ));
     } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      showError(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final r = _r;
-    // The mock rail's links end in .invalid and go nowhere.
-    final realLink = r.payUrl.isNotEmpty && !Uri.parse(r.payUrl).host.endsWith('.invalid');
+    final organiser = widget.trip.nameOf(widget.trip.organiserId);
     return Scaffold(
       appBar: AppBar(title: const Text('Deposit request')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('${widget.trip.name} deposit', style: AppText.detail()),
-          Text(formatPaise(r.amountPaise), style: AppText.balance()),
-          const SizedBox(height: 4),
-          Row(
+      body: AsyncView<(Me, DepositRequest)>(
+        future: _data,
+        builder: (context, data) {
+          final (me, r) = data;
+          final enough = me.personalBalancePaise >= r.amountPaise;
+          return ListView(
+            padding: const EdgeInsets.all(20),
             children: [
-              Text('For ${widget.trip.nameOf(r.userId)} · due ${formatWeekday(r.due)}', style: AppText.body()),
-              const Spacer(),
-              r.isPaid ? const Tag('Paid', kind: TagKind.trip) : const Tag('Pending', kind: TagKind.pending),
-            ],
-          ),
-          const SizedBox(height: 24),
-          if (!r.isPaid) ...[
-            if (r.payUrl.isNotEmpty) ...[
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                  child: QrImageView(data: r.payUrl, size: 200),
+              SurfaceCard(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    Avatar(organiser, size: 56),
+                    const SizedBox(height: 10),
+                    Text('$organiser asked you for', style: AppText.body(color: AppColors.slate)),
+                    Text(formatPaise(r.amountPaise), style: AppText.balance()),
+                    Text('for ${widget.trip.name} · due ${formatWeekday(r.due)}', style: AppText.detail()),
+                    const SizedBox(height: 10),
+                    r.isOpen ? const Tag('Waiting for you', kind: TagKind.pending) : Tag(r.status == 'paid' ? 'Paid' : 'Cancelled', kind: TagKind.trip),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Center(
-                child: Text(realLink ? 'Scan to pay on PayPal' : 'Demo code: PayPal is simulated', style: AppText.detail()),
-              ),
-            ] else
-              Text('PayPal has not issued a pay link for this request yet.', style: AppText.detail()),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Pay with PayPal'),
-              onPressed: !realLink
-                  ? null
-                  : () => launchUrl(Uri.parse(r.payUrl), mode: LaunchMode.externalApplication),
-            ),
-            if (widget.isMock) ...[
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: _busy ? null : _markPaid,
-                child: const Text('Demo: mark as paid'),
-              ),
+              if (r.isOpen) ...[
+                const SectionTitle('Pay it'),
+                FilledButton(
+                  onPressed: _busy || !enough ? null : _payFromBalance,
+                  child: Text(enough ? 'Pay from balance (${formatPaise(me.personalBalancePaise)})' : 'Balance too low (${formatPaise(me.personalBalancePaise)})'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Pay with PayPal'),
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          await Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => TopUpScreen(trip: widget.trip, suggestPaise: r.amountPaise),
+                          ));
+                          if (mounted) setState(() => _data = _load());
+                        },
+                ),
+                const SizedBox(height: 12),
+                Text('Either way the request is marked paid as soon as the money reaches the trip wallet.',
+                    textAlign: TextAlign.center, style: AppText.small()),
+              ],
             ],
-          ] else
-            Text('Paid ${r.paidAt == null ? '' : formatDateTime(r.paidAt!)}. Thank you!', style: AppText.body()),
-          const SizedBox(height: 16),
-          Text('Reference ${r.paypalInvoiceId}', style: AppText.small()),
-        ],
+          );
+        },
       ),
     );
   }

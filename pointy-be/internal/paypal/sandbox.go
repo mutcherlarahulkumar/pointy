@@ -17,9 +17,9 @@ import (
 
 // Sandbox talks to the real PayPal REST API (sandbox by default).
 //
-// The app keeps its books in rupees. PayPal India accounts aside, PayPal does
-// not transact in INR, so every amount is converted to Currency at a fixed
-// demo rate before it is sent.
+// The app keeps its books in rupees. PayPal does not take INR between
+// accounts, so every amount is converted to Currency (USD by default, for a
+// US sandbox business account) at a fixed demo rate before it is sent.
 type Sandbox struct {
 	BaseURL      string // https://api-m.sandbox.paypal.com
 	ClientID     string
@@ -29,7 +29,6 @@ type Sandbox struct {
 	INRPerUnit   float64 // demo rate: how many rupees one unit of Currency costs
 	ReturnURL    string
 	CancelURL    string
-	InvoicerMail string
 	HTTP         *http.Client
 
 	mu      sync.Mutex
@@ -133,68 +132,17 @@ func (s *Sandbox) CreateOrder(ctx context.Context, reference string, amount doma
 func (s *Sandbox) CaptureOrder(ctx context.Context, orderID string) error {
 	var out struct{ Status string }
 	if err := s.call(ctx, http.MethodPost, "/v2/checkout/orders/"+orderID+"/capture", "capture-"+orderID, struct{}{}, &out); err != nil {
+		// Captured earlier (for example by the return page) but not yet
+		// recorded here: the money is in, so this is success.
+		if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
+			return nil
+		}
 		return err
 	}
 	if out.Status != "COMPLETED" {
 		return fmt.Errorf("paypal: order %s is %s, not COMPLETED", orderID, out.Status)
 	}
 	return nil
-}
-
-func (s *Sandbox) Payout(ctx context.Context, batchID string, items []PayoutItem) (string, error) {
-	list := make([]any, len(items))
-	for i, it := range items {
-		m := s.money(it.Amount)
-		list[i] = map[string]any{
-			"recipient_type": "EMAIL", "receiver": it.ReceiverEmail, "note": it.Note, "sender_item_id": it.ItemID,
-			"amount": map[string]string{"value": m["value"], "currency": m["currency_code"]},
-		}
-	}
-	in := map[string]any{
-		"sender_batch_header": map[string]any{"sender_batch_id": batchID, "email_subject": "You have a payment from Pointy"},
-		"items":               list,
-	}
-	var out struct {
-		BatchHeader struct {
-			PayoutBatchID string `json:"payout_batch_id"`
-		} `json:"batch_header"`
-	}
-	if err := s.call(ctx, http.MethodPost, "/v1/payments/payouts", batchID, in, &out); err != nil {
-		return "", err
-	}
-	return out.BatchHeader.PayoutBatchID, nil
-}
-
-func (s *Sandbox) CreateAndSendInvoice(ctx context.Context, in InvoiceInput) (Invoice, error) {
-	draft := map[string]any{
-		"detail": map[string]any{
-			"currency_code": s.Currency, "reference": in.Reference, "note": in.Description,
-			"payment_term": map[string]any{"due_date": in.Due.Format("2006-01-02")},
-		},
-		"invoicer":           map[string]any{"email_address": s.InvoicerMail},
-		"primary_recipients": []any{map[string]any{"billing_info": map[string]any{"email_address": in.RecipientEmail}}},
-		"items":              []any{map[string]any{"name": in.Description, "quantity": "1", "unit_amount": s.money(in.Amount)}},
-	}
-	var created struct {
-		ID   string
-		Href string
-	}
-	if err := s.call(ctx, http.MethodPost, "/v2/invoicing/invoices", in.Reference, draft, &created); err != nil {
-		return Invoice{}, err
-	}
-	id := created.ID
-	if id == "" { // the create call answers with a link to the new invoice
-		id = created.Href[strings.LastIndex(created.Href, "/")+1:]
-	}
-	var sent struct{ Href string }
-	if err := s.call(ctx, http.MethodPost, "/v2/invoicing/invoices/"+id+"/send", "send-"+id, map[string]any{"send_to_invoicer": false}, &sent); err != nil {
-		return Invoice{}, err
-	}
-	return Invoice{ID: id, PayURL: sent.Href}, nil
-}
-
-func (s *Sandbox) RemindInvoice(ctx context.Context, invoiceID string) error {
-	return s.call(ctx, http.MethodPost, "/v2/invoicing/invoices/"+invoiceID+"/remind", "", map[string]any{"send_to_invoicer": false}, nil)
 }
 
 func (s *Sandbox) VerifyWebhook(ctx context.Context, h http.Header, body []byte) error {

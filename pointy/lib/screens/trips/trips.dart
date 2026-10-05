@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
-import '../../dates.dart';
-import '../../models.dart';
 import '../../money.dart';
+import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/tag.dart';
 import '../../widgets/tile_icon.dart';
@@ -13,7 +13,7 @@ import '../../widgets/wallet_card.dart';
 import 'new_trip.dart';
 import 'trip_shell.dart';
 
-/// Your trips: the active one as a green wallet card, then finished ones.
+/// Your trips: open ones as green wallet cards, then finished ones.
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
 
@@ -26,22 +26,35 @@ class _TripsScreenState extends State<TripsScreen> {
 
   void _reload() => setState(() => _trips = api.trips());
 
-  Future<void> _open(Trip t) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TripShell(tripId: t.id)));
+  Future<void> _go(Widget screen) async {
+    await Navigator.of(context).push(screen is TripShell ? tripRoute(screen.tripId) : MaterialPageRoute(builder: (_) => screen));
     _reload();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Trips', style: AppText.title())),
+      appBar: AppBar(
+        title: Text('Trips', style: AppText.title()),
+        actions: [
+          IconButton(tooltip: 'Plan a trip', icon: const Icon(Icons.add_circle_outline), onPressed: () => _go(const NewTripScreen())),
+        ],
+      ),
       body: AsyncView<List<Trip>>(
         future: _trips,
         onRetry: _reload,
         builder: (context, trips) {
+          if (trips.isEmpty) {
+            return EmptyState(
+              icon: Icons.luggage_rounded,
+              title: 'No trips yet',
+              body: 'Plan one, add friends by mobile number, and everyone chips into one wallet.',
+              actionLabel: 'Plan a trip',
+              onAction: () => _go(const NewTripScreen()),
+            );
+          }
           final open = trips.where((t) => t.isOpen).toList();
           final done = trips.where((t) => !t.isOpen).toList();
-          final me = api.userId;
           return RefreshIndicator(
             onRefresh: () async => _reload(),
             child: ListView(
@@ -50,40 +63,30 @@ class _TripsScreenState extends State<TripsScreen> {
                 for (final t in open) ...[
                   WalletCard(
                     title: t.name,
-                    subtitle: t.day > 0 && t.day <= t.days ? 'Day ${t.day} of ${t.days}' : formatDay(t.start),
+                    subtitle: t.when,
                     balancePaise: t.balancePaise,
-                    onTap: () => _open(t),
+                    onTap: () => _go(TripShell(tripId: t.id)),
                     footer: Row(
                       children: [
-                        Expanded(child: Text('Your share ${formatPaise(t.member(me)?.leftPaise ?? 0)} left')),
+                        Expanded(child: Text('Your share ${formatPaise(t.member(api.userId)?.leftPaise ?? 0)}')),
                         Text('${t.members.length} people'),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
                 ],
-                if (open.isEmpty)
-                  SurfaceCard(child: Text('No trip on right now.', style: AppText.body(color: AppColors.slate))),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.add),
-                  label: const Text('Plan a new trip'),
-                  onPressed: () async {
-                    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewTripScreen()));
-                    _reload();
-                  },
-                ),
+                OutlinedButton.icon(icon: const Icon(Icons.add), label: const Text('Plan a new trip'), onPressed: () => _go(const NewTripScreen())),
                 if (done.isNotEmpty) ...[
-                  const SectionTitle('Finished trips'),
+                  const SectionTitle('Finished'),
                   for (final t in done)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const TileIcon(Icons.luggage_outlined),
-                      title: Text(t.name, style: AppText.body(weight: FontWeight.w600)),
-                      subtitle: Text('${formatDay(t.start)} – ${formatDay(t.end)} · ${formatPaise(t.spentPaise)} spent',
-                          style: AppText.detail()),
-                      trailing: const Tag('Settled', kind: TagKind.plain),
-                      onTap: () => _open(t),
+                    Card(
+                      child: ListTile(
+                        leading: const TileIcon(Icons.luggage_outlined),
+                        title: Text(t.name, style: AppText.body(weight: FontWeight.w600)),
+                        subtitle: Text('${t.when} · ${formatPaise(t.spentPaise)} spent', style: AppText.detail()),
+                        trailing: const Tag('Settled'),
+                        onTap: () => _go(TripShell(tripId: t.id)),
+                      ),
                     ),
                 ],
               ],

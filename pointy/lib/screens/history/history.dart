@@ -6,12 +6,17 @@ import '../../models.dart';
 import '../../money.dart';
 import '../../theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/section_title.dart';
 import '../../widgets/tag.dart';
 import '../../widgets/tile_icon.dart';
 
-/// Every payment, newest first, tagged Trip or Personal.
+/// Every movement of your money, newest first, tagged Trip or Personal.
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key});
+  const HistoryScreen({super.key, this.standalone = false});
+
+  /// Opened on its own (from an alert) rather than as a bottom-bar tab.
+  final bool standalone;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -19,26 +24,45 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   late Future<List<HistoryItem>> _history = api.history();
+  String _filter = 'all'; // all, personal, trip
 
   void _reload() => setState(() => _history = api.history());
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('History', style: AppText.title())),
+      appBar: AppBar(title: widget.standalone ? const Text('History') : Text('History', style: AppText.title())),
       body: AsyncView<List<HistoryItem>>(
         future: _history,
         onRetry: _reload,
         builder: (context, items) {
-          if (items.isEmpty) return const ErrorView(message: 'No payments yet.');
-          final sorted = [...items]..sort((a, b) => b.at.compareTo(a.at));
+          if (items.isEmpty) {
+            return const EmptyState(icon: Icons.receipt_long_rounded, title: 'No activity yet', body: 'Payments, top-ups and refunds show up here.');
+          }
+          final shown = items.where((h) => _filter == 'all' || (_filter == 'trip') == h.isTrip).toList();
+          final rows = <Widget>[];
+          DateTime? day;
+          for (final h in shown) {
+            if (day == null || !sameDay(day, h.at)) {
+              day = h.at;
+              rows.add(SectionTitle(formatWeekday(h.at)));
+            }
+            rows.add(Padding(padding: const EdgeInsets.only(bottom: 8), child: _row(h)));
+          }
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: ListView.separated(
+            child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-              itemCount: sorted.length,
-              separatorBuilder: (context, i) => const SizedBox(height: 8),
-              itemBuilder: (context, i) => _row(sorted[i]),
+              children: [
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final (v, label) in const [('all', 'All'), ('personal', 'Personal'), ('trip', 'Trips')])
+                      ChoiceChip(label: Text(label), selected: _filter == v, onSelected: (_) => setState(() => _filter = v)),
+                  ],
+                ),
+                ...rows,
+              ],
             ),
           );
         },
@@ -47,26 +71,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _row(HistoryItem h) {
-    final incoming = h.kind == 'deposit' || h.kind == 'refund';
-    final where = [
-      if (h.isTrip && h.tripName.isNotEmpty) h.tripName,
-      if (h.placeName.isNotEmpty) h.placeName,
-      formatDateTime(h.at),
-    ].join(' · ');
+    final icon = switch (h.kind) {
+      'deposit' => Icons.savings_outlined,
+      'topup' => Icons.add_card_rounded,
+      'refund' => Icons.undo_rounded,
+      'received' => Icons.call_received_rounded,
+      _ when !h.isTrip => Icons.north_east_rounded,
+      _ => categoryIcon(h.category),
+    };
+    final sub = [if (h.subtitle.isNotEmpty) h.subtitle, formatTime(h.at)].join(' · ');
     return Card(
       child: ListTile(
-        leading: TileIcon(switch (h.kind) {
-          'deposit' => Icons.savings_outlined,
-          'refund' => Icons.undo,
-          _ => categoryIcon(h.category),
-        }),
-        title: Text(h.title, style: AppText.body(weight: FontWeight.w600)),
+        leading: TileIcon(icon,
+            background: h.isIncoming ? AppColors.pine100 : (h.isTrip ? AppColors.pine100 : AppColors.personalBg),
+            color: h.isIncoming ? AppColors.pine700 : (h.isTrip ? AppColors.pine700 : AppColors.personal)),
+        title: Text(h.title, style: AppText.body(weight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(where, style: AppText.detail()),
+              Text(sub, style: AppText.detail(), maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
               Tag.wallet(h.isTrip),
             ],
@@ -76,10 +101,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text('${incoming ? '+' : ''}${formatPaise(h.amountPaise)}',
-                style: AppText.body(weight: FontWeight.w600, color: incoming ? AppColors.pine700 : AppColors.ink)),
-            if (h.isTrip && h.kind == 'payment')
-              Text('your part ${formatPaise(h.yourPartPaise)}', style: AppText.small()),
+            Text('${h.isIncoming ? '+' : (h.kind == 'payment' ? '−' : '')}${formatPaise(h.amountPaise)}',
+                style: AppText.body(weight: FontWeight.w700, color: h.isIncoming ? AppColors.pine700 : AppColors.ink)),
+            if (h.isTrip && h.kind == 'payment') Text('your part ${formatPaise(h.yourPartPaise)}', style: AppText.small()),
           ],
         ),
       ),

@@ -4,7 +4,7 @@
     <!-- Rough location, read only at payment time and only if allowed in the app. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
-        android:label="pointy"
+        android:label="Pointy"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
