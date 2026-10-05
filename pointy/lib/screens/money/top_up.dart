@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../api.dart';
+import '../../payment_lock.dart';
 import '../../money.dart';
 import '../../models.dart';
 import '../../theme.dart';
@@ -70,6 +71,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _start(int paise) async {
+    if (!_paypal && !await confirmPayment(context, 'Move ${formatPaise(paise)} from your balance to ${widget.trip!.name}')) return;
     setState(() => _busy = true);
     try {
       if (!_paypal) {

@@ -146,6 +146,19 @@ func TestRegisterLoginAndLockout(t *testing.T) {
 	if _, ok := s.UserForToken(log.Token); ok {
 		t.Fatal("token still works after sign out")
 	}
+
+	// The PIN check before a payment shares the lockout with sign-in.
+	if err := s.VerifyPIN(reg.User.ID, "246810"); err != nil {
+		t.Fatalf("right PIN: %v", err)
+	}
+	for i := 0; i < maxFailedPINs; i++ {
+		if err := s.VerifyPIN(reg.User.ID, "135790"); code(err) != "wrong_pin" {
+			t.Fatalf("verify attempt %d: %v", i, err)
+		}
+	}
+	if _, err := s.Login("9876543210", "246810"); code(err) != "too_many_attempts" {
+		t.Fatalf("wrong PINs at payment should lock sign-in too: %v", err)
+	}
 }
 
 func TestTopUpCapturesOnce(t *testing.T) {

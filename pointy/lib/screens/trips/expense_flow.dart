@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../api.dart';
+import '../../payment_lock.dart';
 import '../../location.dart';
 import '../../money.dart';
 import '../../models.dart';
@@ -471,6 +472,8 @@ class _ReviewScreenState extends State<_ReviewScreen> {
 
   Future<void> _pay({bool confirmOverBudget = false}) async {
     final d = widget.d;
+    // Asked once: "Pay anyway" after a budget warning is the same payment.
+    if (!confirmOverBudget && !await confirmPayment(context, 'Pay ${formatPaise(d.amountPaise)} from the ${d.trip.name} wallet')) return;
     setState(() => _busy = true);
     try {
       final loc = await coarseLocation();
