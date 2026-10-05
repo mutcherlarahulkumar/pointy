@@ -9,7 +9,10 @@ import 'screens/history/history.dart';
 import 'screens/home/home.dart';
 import 'screens/pay/scan.dart';
 import 'screens/trips/trips.dart';
+import 'api.dart';
+import 'family_mode.dart';
 import 'look.dart';
+import 'screens/family/child_home.dart';
 import 'session.dart';
 import 'tabs.dart';
 import 'tour.dart';
@@ -22,6 +25,12 @@ Future<void> main() async {
   GoogleFonts.config.allowRuntimeFetching = false;
   await Session.restore();
   await AppLook.restore();
+  // A child account opens straight in the child version.
+  if (Session.signedIn.value) {
+    try {
+      await api.me().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
   runApp(const PointyApp());
 }
 
@@ -42,7 +51,15 @@ class PointyApp extends StatelessWidget {
         // Signed in: the app. Signed out: the welcome screen.
         home: ValueListenableBuilder<bool>(
           valueListenable: Session.signedIn,
-          builder: (context, signedIn, _) => signedIn ? const MainShell() : const WelcomeScreen(),
+          builder: (context, signedIn, _) => !signedIn
+              ? const WelcomeScreen()
+              : ValueListenableBuilder<bool>(
+                  valueListenable: FamilyMode.isChild,
+                  builder: (context, child, _) => AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 400),
+                    child: child ? const ChildHome(key: ValueKey('child')) : const MainShell(key: ValueKey('adult')),
+                  ),
+                ),
         ),
       ),
     );

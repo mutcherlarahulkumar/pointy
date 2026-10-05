@@ -113,6 +113,12 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 	case *domain.Payout:
 		_, err = tx.Exec(ctx, `INSERT INTO payouts (id, user_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
 			v.ID, v.UserID, js(v), v.CreatedAt)
+	case *domain.FamilyLink:
+		_, err = tx.Exec(ctx, `INSERT INTO family_links (id, parent_id, child_id, body, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET body=$4`,
+			v.ID, v.ParentID, v.ChildID, js(v), v.CreatedAt)
+	case *domain.Approval:
+		_, err = tx.Exec(ctx, `INSERT INTO approvals (id, child_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
+			v.ID, v.ChildID, js(v), v.CreatedAt)
 	case *domain.GroupBuy:
 		_, err = tx.Exec(ctx, `INSERT INTO group_buys (id, trip_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
 			v.ID, v.TripID, js(v), v.CreatedAt)
@@ -314,6 +320,34 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 					return err
 				}
 				s.Payouts = append(s.Payouts, p)
+				return nil
+			})
+		},
+		func() error {
+			return q(`SELECT body FROM family_links ORDER BY seq`, func(r pgx.Rows) error {
+				var body []byte
+				if err := r.Scan(&body); err != nil {
+					return err
+				}
+				l := &domain.FamilyLink{}
+				if err := json.Unmarshal(body, l); err != nil {
+					return err
+				}
+				s.FamilyLinks = append(s.FamilyLinks, l)
+				return nil
+			})
+		},
+		func() error {
+			return q(`SELECT body FROM approvals ORDER BY seq`, func(r pgx.Rows) error {
+				var body []byte
+				if err := r.Scan(&body); err != nil {
+					return err
+				}
+				a := &domain.Approval{}
+				if err := json.Unmarshal(body, a); err != nil {
+					return err
+				}
+				s.Approvals = append(s.Approvals, a)
 				return nil
 			})
 		},

@@ -69,15 +69,19 @@ Future<bool> confirmPayment(BuildContext context, String what) async {
 }
 
 /// Shows the Pointy PIN sheet; true when the server accepted the PIN.
-Future<bool> askPin(BuildContext context, String what) async {
-  final ok = await showModalBottomSheet<bool>(
+Future<bool> askPin(BuildContext context, String what) async => await pinValue(context, what) != null;
+
+/// The PIN sheet for actions the server checks again itself (linking a
+/// child, approving a child's payment): the PIN once the server accepted it,
+/// or null if the person gave up.
+Future<String?> pinValue(BuildContext context, String what) {
+  return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.surface,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (_) => _PinSheet(what: what),
   );
-  return ok == true;
 }
 
 /// The Pointy PIN sheet: six digits, checked by the server.
@@ -104,7 +108,7 @@ class _PinSheetState extends State<_PinSheet> {
     setState(() => _busy = true);
     try {
       await api.verifyPin(_pin);
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, _pin);
     } on ApiException catch (e) {
       if (!mounted) return;
       final left = e.details?['attempts_left'];

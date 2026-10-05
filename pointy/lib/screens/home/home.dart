@@ -21,6 +21,7 @@ import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
+import '../family/family.dart';
 import '../money/top_up.dart';
 import '../money/withdraw.dart';
 import '../profile/profile.dart';
@@ -201,6 +202,24 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
           ),
           const SizedBox(height: 16),
           if (_offerTour) ...[_tourBanner(), const SizedBox(height: 16)],
+          if (me.familyInvites > 0) ...[
+            Material(
+              color: AppColors.pine100,
+              borderRadius: BorderRadius.circular(16),
+              child: ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                leading: Icon(Icons.family_restroom_rounded, color: AppColors.pine700),
+                title: Text('A parent asks to look after your Pointy', style: AppText.body(weight: FontWeight.w600)),
+                subtitle: Text('See what changes before you say yes', style: AppText.detail()),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  await Navigator.of(context).push(familyRoute());
+                  if (mounted) setState(() => _data = _load());
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
           PersonalCard(
             key: TourKeys.balance,
             balancePaise: me.personalBalancePaise,

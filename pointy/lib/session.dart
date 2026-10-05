@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
+import 'family_mode.dart';
 
 /// Remembers who is signed in on this phone. The token is kept in the app's
 /// private storage, so the person stays signed in between launches.
@@ -57,6 +58,7 @@ class Session {
       await prefs.remove(_key);
       await prefs.remove(_idKey);
     } catch (_) {}
+    FamilyMode.isChild.value = false;
     signedIn.value = false;
     navigatorKey.currentState?.popUntil((r) => r.isFirst);
   }

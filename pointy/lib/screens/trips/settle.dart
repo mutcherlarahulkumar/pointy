@@ -7,6 +7,7 @@ import '../../theme.dart';
 import '../../widgets/ai_card.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/section_title.dart';
+import '../../widgets/success.dart';
 import '../../widgets/tag.dart';
 
 /// Settle up: a recap, the totals, and the refund each person gets back.
@@ -45,6 +46,15 @@ class _SettleScreenState extends State<SettleScreen> {
     try {
       final done = await api.settle(widget.trip.id, key: _key);
       setState(() => _settlement = Future.value(done));
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SuccessScreen(
+          title: '${widget.trip.name} is closed',
+          amount: formatPaise(done.refundPaise),
+          subtitle: 'went back to ${done.lines.where((l) => l.refundPaise > 0).length} people\'s Pointy balances',
+          rows: [for (final l in done.lines) if (l.refundPaise > 0) (l.user.name, formatPaise(l.refundPaise))],
+        ),
+      ));
     } catch (e) {
       if (e is ApiException && e.status >= 400 && e.status < 500) _key = newIdempotencyKey();
       if (mounted) showError(context, e);

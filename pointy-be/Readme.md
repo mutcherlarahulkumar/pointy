@@ -72,12 +72,13 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 | Requests | `GET/POST /api/money-requests`, `POST /api/money-requests/{id}/pay`, `.../decline`, `POST /api/splits` |
 | Activity | `GET /api/history`, `GET /api/alerts`, `POST /api/alerts/seen`, `POST /api/suggestions` |
 | Trips | `GET/POST /api/trips`, `GET /api/trips/{id}`, `POST /api/trips/{id}/members`, `POST /api/trips/{id}/deposits` (from your balance) |
+| Parenting | `GET /api/family` (role, children with limits and what is left, invites, approvals waiting), `POST /api/family/invites` (`{"child_phone","birth_date","daily_limit_paise","monthly_limit_paise","accept_terms","pin"}` → one-time `code`), `POST /api/family/invites/{id}/accept` (`{"code","pin"}`, the child), `.../decline`, `PUT /api/family/children/{id}/limits` (`pin`), `POST /api/family/children/{id}/unlink` (`pin`), `GET /api/family/children/{id}/activity`, `POST /api/family/children/{id}/code-key` (`pin` → TOTP `secret`), `POST /api/family/approvals` (child), `POST /api/family/approvals/{id}/approve` (`pin`) or `/decline`. `POST /api/payments/personal` takes `parent_code` for a child's over-limit payment. `GET /api/me` has `family_role` and `family_invites` |
 | Buy together | `POST /api/trips/{id}/shop-agent` (`{"text"}` → `search_id`, up to 3 `picks` with `why`, `each_paise`), `POST /api/trips/{id}/group-buys` (`{"search_id","index","why"}`), `GET /api/trips/{id}/group-buys`, `GET /api/group-buys/{id}`, `POST /api/group-buys/{id}/join` (`{"via": "wallet"|"paypal"}`; PayPal answers with the share's `approve_url`), `POST /api/group-buys/paypal/{orderID}/authorize`, `POST /api/group-buys/{id}/decline` |
 | Trip money | `GET/POST /api/trips/{id}/expenses` (`mode`: `member` with `payee_user_id`, any Pointy user, or `reimburse`), `GET/PUT /api/trips/{id}/budgets`, `POST .../budget-check`, `GET .../insights`, `GET .../settlement`, `POST .../settle` (refunds go to balances) |
 | Assistant | `POST /api/trips/{id}/assistant/plan`, `POST .../plans/{planID}/confirm`, `GET /api/trips/{id}/requests`, `POST /api/requests/{id}/remind`, `POST /api/requests/{id}/pay` |
 | PayPal | `GET /paypal/return` (finishes a checkout), `GET /paypal/cancel`, `POST /webhooks/paypal` |
 
-Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `group_buy_open`, `group_buy_closed`, `search_expired`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
+Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `group_buy_open`, `group_buy_closed`, `search_expired`, `needs_parent`, `wrong_parent_code`, `child_payment_cap`, `child_balance_cap`, `child_month_cap`, `child_account`, `not_a_child`, `wrong_code`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
 
 ## AI features (optional)
 
@@ -92,6 +93,12 @@ With `GROQ_API_KEY` set, `internal/ai` uses Groq's OpenAI-compatible chat API (`
 - **Receipt scanning**: `POST /api/receipts/scan` with `{"image_base64": "..."}` (JPEG/PNG, up to 3 MB) returns the total in paise, merchant, date, category and a short description. Read by Groq's vision model (`POINTY_AI_VISION_MODEL`, default `meta-llama/llama-4-scout-17b-16e-instruct`). Nothing is saved; the app fills the expense form and the person checks it. Non-rupee bills and photos that are not receipts are turned away. Answers `503 ai_off` when no key is set.
 
 Requests ask for JSON matching a schema; on the gpt-oss models Groq enforces it strictly (constrained decoding), and answers are validated either way. Without a key, or on any error or timeout (20 s), the rule-based summary and parser answer instead, so the app never depends on the model being up. `Insights.summary_source` and `Plan.source` say which one answered.
+
+## Pointy Parenting (`internal/app/family.go`)
+
+- A `FamilyLink` (table `family_links`, migration 0005) is made only when both sides agree: the parent's PIN plus acceptance of terms version `family-2026-10`, then the child's PIN plus the 6-digit pairing code (kept only as a hash, 10 minutes, 5 tries). Adults (by the declared birth date) are refused; at 18 the link ends by itself (`graduated`).
+- Limits are checked in `transferL`, the one path every personal payment takes: over the daily or monthly limit a child needs `parent_code` (TOTP, ±1 step, never the same step twice) or an `Approval` (table `approvals`) the parent approves with their PIN, which pays at once. Payments over ₹2,000, balances over ₹10,000 and more than ₹10,000 received in a month are refused (RBI small PPI).
+- Child accounts cannot top up with PayPal, withdraw, create or join trips, and get no time-or-place suggestions; no location is stored with their payments (DPDP Act s.9(3)).
 
 ## Buy together (group purchases)
 

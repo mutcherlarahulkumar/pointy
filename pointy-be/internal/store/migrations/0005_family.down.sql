@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS approvals;
+DROP TABLE IF EXISTS family_links;

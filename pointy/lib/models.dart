@@ -70,6 +70,11 @@ class Me {
 
   /// Where Pointy pays this person out; empty until they add one.
   final String paypalEmail;
+
+  /// "child" for a child account (the app shows the child version),
+  /// "parent" for someone looking after one, else "".
+  final String familyRole;
+  final int familyInvites; // parents asking to link this account
   Me({
     required this.user,
     required this.personalBalancePaise,
@@ -79,7 +84,11 @@ class Me {
     required this.paypalMode,
     required this.now,
     this.paypalEmail = '',
+    this.familyRole = '',
+    this.familyInvites = 0,
   });
+
+  bool get isChild => familyRole == 'child';
 
   bool get isMock => paypalMode == 'mock';
 
@@ -92,6 +101,8 @@ class Me {
         paypalMode: _str(j['paypal_mode']),
         now: parseIst(j['now'] as String?),
         paypalEmail: _str(_map(j['user'])['paypal_email']),
+        familyRole: _str(j['family_role']),
+        familyInvites: _int(j['family_invites']),
       );
 }
 
@@ -920,4 +931,146 @@ class GroupBuy {
         note: _str(j['note']),
         deadline: parseIst(j['deadline'] as String?),
       );
+}
+
+/// One child account, as their parent (or the child) sees it.
+class ChildView {
+  final String linkId;
+  final String status; // invited or active
+  final Person child;
+  final Person parent;
+  final String birthDate;
+  final int age;
+  final int balancePaise;
+  final int dailyLimitPaise;
+  final int monthlyLimitPaise;
+  final int spentTodayPaise;
+  final int spentMonthPaise;
+  final int dailyLeftPaise;
+  final int monthlyLeftPaise;
+  final int canReceivePaise;
+  final int maxPaymentPaise;
+  final int pending;
+  final DateTime? codeExpires;
+  ChildView(
+      {required this.linkId,
+      required this.status,
+      required this.child,
+      required this.parent,
+      required this.birthDate,
+      required this.age,
+      required this.balancePaise,
+      required this.dailyLimitPaise,
+      required this.monthlyLimitPaise,
+      required this.spentTodayPaise,
+      required this.spentMonthPaise,
+      required this.dailyLeftPaise,
+      required this.monthlyLeftPaise,
+      required this.canReceivePaise,
+      required this.maxPaymentPaise,
+      required this.pending,
+      this.codeExpires});
+
+  bool get isActive => status == 'active';
+
+  factory ChildView.fromJson(Map<String, dynamic> j) => ChildView(
+        linkId: _str(j['link_id']),
+        status: _str(j['status']),
+        child: Person.fromJson(_map(j['child'])),
+        parent: Person.fromJson(_map(j['parent'])),
+        birthDate: _str(j['birth_date']),
+        age: _int(j['age']),
+        balancePaise: _int(j['balance_paise']),
+        dailyLimitPaise: _int(j['daily_limit_paise']),
+        monthlyLimitPaise: _int(j['monthly_limit_paise']),
+        spentTodayPaise: _int(j['spent_today_paise']),
+        spentMonthPaise: _int(j['spent_month_paise']),
+        dailyLeftPaise: _int(j['daily_left_paise']),
+        monthlyLeftPaise: _int(j['monthly_left_paise']),
+        canReceivePaise: _int(j['can_receive_paise']),
+        maxPaymentPaise: _int(j['max_payment_paise']),
+        pending: _int(j['pending_approvals']),
+        codeExpires: j['code_expires'] == null ? null : parseIst(j['code_expires'] as String?),
+      );
+}
+
+/// A child's payment over their limit, waiting for the parent.
+class Approval {
+  final String id;
+  final Person child;
+  final Person payee;
+  final int amountPaise;
+  final String note;
+  final String reason; // daily or monthly
+  final String status;
+  final DateTime ends;
+  Approval(
+      {required this.id,
+      required this.child,
+      required this.payee,
+      required this.amountPaise,
+      required this.note,
+      required this.reason,
+      required this.status,
+      required this.ends});
+
+  factory Approval.fromJson(Map<String, dynamic> j) => Approval(
+        id: _str(j['id']),
+        child: Person.fromJson(_map(j['child'])),
+        payee: Person.fromJson(_map(j['payee'])),
+        amountPaise: _int(j['amount_paise']),
+        note: _str(j['note']),
+        reason: _str(j['reason']),
+        status: _str(j['status']),
+        ends: parseIst(j['ends'] as String?),
+      );
+}
+
+/// Everything the Family screen shows one person.
+class FamilyView {
+  final String role; // "", parent or child
+  final List<ChildView> children;
+  final ChildView? me;
+  final List<ChildView> invites;
+  final List<Approval> approvals;
+  final String termsVersion;
+  final int maxPaymentPaise;
+  final int maxMonthInPaise;
+  final int maxBalancePaise;
+  FamilyView(
+      {required this.role,
+      required this.children,
+      required this.me,
+      required this.invites,
+      required this.approvals,
+      required this.termsVersion,
+      required this.maxPaymentPaise,
+      required this.maxMonthInPaise,
+      required this.maxBalancePaise});
+
+  factory FamilyView.fromJson(Map<String, dynamic> j) {
+    final rules = _map(j['rules']);
+    return FamilyView(
+      role: _str(j['role']),
+      children: _list(j['children'], ChildView.fromJson),
+      me: j['me'] == null ? null : ChildView.fromJson(_map(j['me'])),
+      invites: _list(j['invites'], ChildView.fromJson),
+      approvals: _list(j['approvals'], Approval.fromJson),
+      termsVersion: _str(j['terms_version']),
+      maxPaymentPaise: _int(rules['max_payment_paise']),
+      maxMonthInPaise: _int(rules['max_month_in_paise']),
+      maxBalancePaise: _int(rules['max_balance_paise']),
+    );
+  }
+}
+
+/// A pairing code for the child's phone, shown once.
+class FamilyInvite {
+  final ChildView child;
+  final String code;
+  final DateTime expires;
+  FamilyInvite({required this.child, required this.code, required this.expires});
+
+  factory FamilyInvite.fromJson(Map<String, dynamic> j) =>
+      FamilyInvite(child: ChildView.fromJson(_map(j['child'])), code: _str(j['code']), expires: parseIst(j['expires'] as String?));
 }

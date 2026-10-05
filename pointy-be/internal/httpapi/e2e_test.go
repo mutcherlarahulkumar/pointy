@@ -35,7 +35,7 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, payouts, group_buys, trips, users, schema_migrations CASCADE`)
+		_, err = conn.Exec(ctx, `DROP TABLE IF EXISTS ledger_postings, ledger_entries, sessions, deposits, expenses, deposit_requests, plans, alerts, money_requests, chat_messages, payouts, group_buys, approvals, family_links, trips, users, schema_migrations CASCADE`)
 		conn.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -208,6 +208,33 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 	if len(call(asha, "GET", "/api/payouts", nil, 200)["list"].([]any)) != 1 {
 		t.Fatal("payout not listed")
 	}
+
+	// Parenting: Asha links her daughter Kavya. Both phones take part.
+	kavya := &phone{}
+	kavya.token = call(nil, "POST", "/api/auth/register", map[string]string{"name": "Kavya", "phone": "9988776655", "pin": "112233"}, 201)["token"].(string)
+	inv := call(asha, "POST", "/api/family/invites", map[string]any{"child_phone": "9988776655", "birth_date": "2013-06-01",
+		"daily_limit_paise": 20000, "monthly_limit_paise": 300000, "accept_terms": "family-2026-10", "pin": "246810"}, 201)
+	link := inv["child"].(map[string]any)["link_id"].(string)
+	call(kavya, "POST", "/api/family/invites/"+link+"/accept", map[string]string{"code": "000000", "pin": "112233"}, 401)
+	call(kavya, "POST", "/api/family/invites/"+link+"/accept", map[string]string{"code": inv["code"].(string), "pin": "112233"}, 201)
+	if call(kavya, "GET", "/api/me", nil, 200)["family_role"] != "child" {
+		t.Fatal("Kavya should be a child account")
+	}
+	call(asha, "POST", "/api/payments/personal", map[string]any{"payee_user_id": call(kavya, "GET", "/api/me", nil, 200)["user"].(map[string]any)["id"], "amount_paise": 50000, "description": "Pocket money"}, 201)
+	over := call(kavya, "POST", "/api/payments/personal", map[string]any{"payee_user_id": devID, "amount_paise": 30000, "description": "Book"}, 409)
+	if over["error"].(map[string]any)["code"] != "needs_parent" {
+		t.Fatalf("over the limit: %v", over)
+	}
+	apr := call(kavya, "POST", "/api/family/approvals", map[string]any{"payee_id": devID, "amount_paise": 30000, "note": "Book"}, 201)
+	call(asha, "POST", "/api/family/approvals/"+apr["id"].(string)+"/approve", map[string]string{"pin": "246810"}, 201)
+	kid := call(asha, "GET", "/api/family", nil, 200)["children"].([]any)[0].(map[string]any)
+	if num(kid["balance_paise"]) != 20000 || num(kid["spent_today_paise"]) != 30000 {
+		t.Fatalf("child after approval %v", kid)
+	}
+	if len(call(asha, "GET", "/api/family/children/"+kid["child"].(map[string]any)["id"].(string)+"/activity", nil, 200)["list"].([]any)) != 2 {
+		t.Fatal("parent should see both payments")
+	}
+	call(kavya, "POST", "/api/withdrawals", map[string]any{"amount_paise": 1000}, 409)
 
 	// Sign out on one phone ends that session only.
 	call(dev, "POST", "/api/auth/logout", nil, 201)
