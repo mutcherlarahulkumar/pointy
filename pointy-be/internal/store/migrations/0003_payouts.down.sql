@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS payouts;
+ALTER TABLE expenses DROP COLUMN IF EXISTS payout_id;
+ALTER TABLE expenses DROP COLUMN IF EXISTS payee_email;
+ALTER TABLE users DROP COLUMN IF EXISTS paypal_email;

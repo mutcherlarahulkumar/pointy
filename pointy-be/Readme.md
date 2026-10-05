@@ -4,9 +4,16 @@ Backend for Pointy: pay friends, request money, split bills and run shared trip 
 
 ## How money works (and why)
 
-PayPal shut down payments between Indian accounts on 1 April 2021, and the Payouts API is not offered in India. So Pointy uses PayPal for one thing only: **adding money** (checkout, the Orders API), with a US sandbox business account charged in USD and shown in rupees.
+Pointy holds money in one **PayPal business account** (a US sandbox business account, charged in USD and shown in rupees; PayPal does not pay between Indian accounts and Payouts is not offered in India). The ledger says whose money it is.
 
-Everything after that moves inside Pointy's double-entry ledger, instantly: paying a friend, money requests, split bills, trip deposits, trip expenses, refunds. Each person has a personal balance and a share in each trip; balances are always derived from the ledger, never stored.
+- **Money in** — checkout (the Orders API). A person approves a payment from their PayPal; it lands in the business account and their Pointy balance (or trip share) goes up.
+- **Money inside** — paying a friend, requests, split bills, moving money into a trip: instant ledger entries, no PayPal call, because the money is already in the business account.
+- **Money out** — Payouts (`POST /v1/payments/payouts`), from the business account to a real PayPal email:
+  - **Withdraw** your balance to your own PayPal.
+  - A trip **pays a shop or person by PayPal** (expense `mode: "paypal"`, the default, with `payee_email`).
+  - **Settle up** pays what is left in a trip to each person's PayPal (`{"payout": true}`); people without a PayPal email get it back in their Pointy balance.
+
+A payout holds the money first, calls PayPal, and posts only if PayPal accepts it; if PayPal refuses, nothing changes. If a payout later comes back (unclaimed and returned, failed, blocked) the entry is reversed and the person gets their money back. `GET /api/money` proves it: the money Pointy's ledger says is in the business account equals what it owes everyone. Balances are always derived from the ledger, never stored.
 
 ## Run it
 
@@ -26,9 +33,9 @@ Settings are in `.env.example`.
 ```
 cmd/server        entry point: PayPal client, Postgres store, HTTP server
 cmd/migrate       moves the schema up or down, shows what is applied
-cmd/paypalcheck   proves the sandbox keys work: create an order, approve it, capture it
+cmd/paypalcheck   proves the sandbox keys work: create an order, approve it, capture it, send a payout
 internal/domain   money, split, ledger, budget maths. No I/O
-internal/paypal   checkout client: interface, Mock, Sandbox
+internal/paypal   checkout and payouts client: interface, Mock, Sandbox
 internal/app      use cases; keeps a working copy in memory and saves every change
 internal/store    Postgres: versioned migrations, each change saved in one transaction
 internal/httpapi  routes, bearer-token auth, JSON, idempotency, PayPal return page
@@ -61,16 +68,17 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 | Area | Routes |
 |---|---|
 | Sign in | `POST /api/auth/check-phone`, `POST /api/auth/register` (name, phone, 6-digit PIN), `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/verify-pin` (`{"pin"}`, checks the PIN before a payment on phones with no screen lock; wrong PINs share the sign-in lockout) |
-| You | `GET /api/me`, `GET /api/contacts`, `GET /api/users/lookup?phone=`, `GET /api/users/{id}` |
+| You | `GET /api/me`, `PUT /api/me/paypal` (`{"email"}`, where payouts go), `GET /api/contacts`, `GET /api/users/lookup?phone=`, `GET /api/users/{id}` |
 | Balance | `POST /api/topups`, `GET /api/deposits/{orderID}`, `POST /api/deposits/{orderID}/capture`, `POST /api/payments/personal` |
+| Money out | `POST /api/withdrawals` (`{"amount_paise"}`, answers the payout with `status` and `paypal_batch_id`), `GET /api/payouts` (also refreshes pending ones), `GET /api/money` (business account total, what is owed, `balanced`, your balance, trip shares, paid in and out, recent payouts) |
 | Requests | `GET/POST /api/money-requests`, `POST /api/money-requests/{id}/pay`, `.../decline`, `POST /api/splits` |
 | Activity | `GET /api/history`, `GET /api/alerts`, `POST /api/alerts/seen`, `POST /api/suggestions` |
 | Trips | `GET/POST /api/trips`, `GET /api/trips/{id}`, `POST /api/trips/{id}/members`, `POST /api/trips/{id}/deposits` (`source`: `paypal` or `balance`) |
-| Trip money | `GET/POST /api/trips/{id}/expenses` (`mode`: `reimburse` or `member`), `GET/PUT /api/trips/{id}/budgets`, `POST .../budget-check`, `GET .../insights`, `GET .../settlement`, `POST .../settle` |
+| Trip money | `GET/POST /api/trips/{id}/expenses` (`mode`: `paypal` with `payee_email`, `reimburse` or `member`), `GET/PUT /api/trips/{id}/budgets`, `POST .../budget-check`, `GET .../insights`, `GET .../settlement`, `POST .../settle` (`{"payout": true}` pays refunds to PayPal) |
 | Assistant | `POST /api/trips/{id}/assistant/plan`, `POST .../plans/{planID}/confirm`, `GET /api/trips/{id}/requests`, `POST /api/requests/{id}/remind`, `POST /api/requests/{id}/pay` |
 | PayPal | `GET /paypal/return` (finishes a checkout), `GET /paypal/cancel`, `POST /webhooks/paypal` |
 
-Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `wrong_pin`, `too_many_attempts`, `signed_out`.
+Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
 
 ## AI features (optional)
 
@@ -91,5 +99,6 @@ Requests ask for JSON matching a schema; on the gpt-oss models Groq enforces it 
 1. In the PayPal developer dashboard create a sandbox **business** account and a **personal** account, both with country **United States**, and a REST app on the business account.
 2. Set `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET`.
 3. `go run ./cmd/paypalcheck`, open the link, approve with the sandbox personal account, then `go run ./cmd/paypalcheck -capture ORDER_ID`. Both print `OK`.
+4. **Payouts** (withdrawals, trips paying shops, settle-up refunds): in the developer dashboard turn on **Payouts** for the REST app, and fund the sandbox business account (Sandbox accounts → the business account → add balance). Then `go run ./cmd/paypalcheck -payout PERSONAL_SANDBOX_EMAIL` sends ₹100 and prints the payout status. Payouts to an email with no PayPal account stay `UNCLAIMED` and come back after 30 days; Pointy then gives the money back.
 
 After approving in the app's browser tab, PayPal sends the person to `/paypal/return`, which captures the payment at once; the app notices within a few seconds. A webhook (`CHECKOUT.ORDER.APPROVED` → `/webhooks/paypal`, with `PAYPAL_WEBHOOK_ID`) is optional extra safety.

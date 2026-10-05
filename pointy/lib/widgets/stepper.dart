@@ -17,6 +17,7 @@ const stepIcons = <String, IconData>{
   'Dates': Icons.event_rounded,
   'Money': Icons.savings_rounded,
   'Who paid': Icons.how_to_reg_rounded,
+  'Pay to': Icons.send_rounded,
   'Number': Icons.phone_iphone_rounded,
   'Name': Icons.badge_rounded,
   'PIN': Icons.lock_rounded,

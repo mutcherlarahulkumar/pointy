@@ -67,6 +67,9 @@ class Me {
   final int openRequests;
   final String paypalMode;
   final DateTime now;
+
+  /// Where Pointy pays this person out; empty until they add one.
+  final String paypalEmail;
   Me({
     required this.user,
     required this.personalBalancePaise,
@@ -75,6 +78,7 @@ class Me {
     required this.openRequests,
     required this.paypalMode,
     required this.now,
+    this.paypalEmail = '',
   });
 
   bool get isMock => paypalMode == 'mock';
@@ -87,6 +91,7 @@ class Me {
         openRequests: _int(j['open_requests']),
         paypalMode: _str(j['paypal_mode']),
         now: parseIst(j['now'] as String?),
+        paypalEmail: _str(_map(j['user'])['paypal_email']),
       );
 }
 
@@ -215,9 +220,11 @@ class Expense {
   final String description;
   final String category;
   final int amountPaise;
-  final String mode; // member, reimburse, transfer
+  final String mode; // paypal, member, reimburse, transfer
   final String payee;
   final String payeeUserId;
+  final String payeeEmail; // mode paypal: the PayPal account paid
+  final String payoutId; // mode paypal: the payout that paid it
   final List<Share> shares;
   final String placeName;
   final DateTime at;
@@ -231,10 +238,15 @@ class Expense {
     required this.mode,
     required this.payee,
     required this.payeeUserId,
+    this.payeeEmail = '',
+    this.payoutId = '',
     required this.shares,
     required this.placeName,
     required this.at,
   });
+
+  /// Paid out of the trip wallet by PayPal, to a shop or person.
+  bool get byPayPal => mode == 'paypal';
 
   bool get isEvenSplit {
     if (shares.isEmpty) return true;
@@ -254,6 +266,8 @@ class Expense {
         mode: _str(j['mode']),
         payee: _str(j['payee']),
         payeeUserId: _str(j['payee_user_id']),
+        payeeEmail: _str(j['payee_email']),
+        payoutId: _str(j['payout_id']),
         shares: _list(j['shares'], Share.fromJson),
         placeName: _str(j['place_name']),
         at: parseIst(j['at'] as String?),
@@ -544,13 +558,15 @@ class SettleLine {
   final int depositedPaise;
   final int usedPaise;
   final int refundPaise;
-  SettleLine({required this.user, required this.depositedPaise, required this.usedPaise, required this.refundPaise});
+  final bool hasPayPal; // gave a PayPal email, so their part can go to PayPal
+  SettleLine({required this.user, required this.depositedPaise, required this.usedPaise, required this.refundPaise, this.hasPayPal = false});
 
   factory SettleLine.fromJson(Map<String, dynamic> j) => SettleLine(
         user: Person.fromJson(_map(j['user'])),
         depositedPaise: _int(j['deposited_paise']),
         usedPaise: _int(j['used_paise']),
         refundPaise: _int(j['refund_paise']),
+        hasPayPal: j['has_paypal'] == true,
       );
 }
 
@@ -560,7 +576,9 @@ class Settlement {
   final int spentPaise;
   final int refundPaise;
   final List<SettleLine> lines;
-  Settlement({required this.status, required this.depositedPaise, required this.spentPaise, required this.refundPaise, required this.lines});
+  final List<Payout> payouts; // refunds sent on to PayPal
+  Settlement(
+      {required this.status, required this.depositedPaise, required this.spentPaise, required this.refundPaise, required this.lines, this.payouts = const []});
 
   factory Settlement.fromJson(Map<String, dynamic> j) => Settlement(
         status: _str(j['status']),
@@ -568,6 +586,7 @@ class Settlement {
         spentPaise: _int(j['spent_paise']),
         refundPaise: _int(j['refund_paise']),
         lines: _list(j['lines'], SettleLine.fromJson),
+        payouts: _list(j['payouts'], Payout.fromJson),
       );
 }
 
@@ -747,5 +766,92 @@ class ChatMessage {
         action: j['action'] == null ? null : ChatAction.fromJson(j['action'] as Map<String, dynamic>),
         source: _str(j['source']),
         at: _str(j['at']),
+      );
+}
+
+/// Money paid out of Pointy's PayPal business account to a real PayPal
+/// account: a withdrawal, a shop paid from a trip, or a settle-up refund.
+class Payout {
+  final String id;
+  final String userId; // whose money it was
+  final String kind; // withdraw, merchant, settle
+  final String email;
+  final String description;
+  final int amountPaise;
+  final String status; // sending, pending, paid, unclaimed, failed, returned
+  final String batchId; // PayPal's reference
+  final String tripId;
+  final DateTime createdAt;
+  Payout(
+      {required this.id,
+      this.userId = '',
+      required this.kind,
+      required this.email,
+      required this.description,
+      required this.amountPaise,
+      required this.status,
+      this.batchId = '',
+      this.tripId = '',
+      required this.createdAt});
+
+  /// How the status reads to a person.
+  String get statusLabel => switch (status) {
+        'paid' => 'Paid',
+        'pending' || 'sending' => 'On its way',
+        'unclaimed' => 'Waiting for PayPal account',
+        'returned' => 'Sent back',
+        _ => 'Failed',
+      };
+
+  factory Payout.fromJson(Map<String, dynamic> j) => Payout(
+        id: _str(j['id']),
+        userId: _str(j['user_id']),
+        kind: _str(j['kind']),
+        email: _str(j['email']),
+        description: _str(j['description']),
+        amountPaise: _int(j['amount_paise']),
+        status: _str(j['status']),
+        batchId: _str(j['paypal_batch_id']),
+        tripId: _str(j['trip_id']),
+        createdAt: parseIst(j['created_at'] as String?),
+      );
+}
+
+/// "Where is my money?": Pointy keeps everyone's money in one PayPal
+/// business account; the ledger says whose it is.
+class MoneyView {
+  final String paypalMode;
+  final String paypalEmail;
+  final int businessAccountPaise;
+  final int owedToEveryonePaise;
+  final bool balanced;
+  final int yourBalancePaise;
+  final int yourTripSharesPaise;
+  final int youPaidInPaise;
+  final int youPaidOutPaise;
+  final List<Payout> payouts;
+  MoneyView(
+      {required this.paypalMode,
+      required this.paypalEmail,
+      required this.businessAccountPaise,
+      required this.owedToEveryonePaise,
+      required this.balanced,
+      required this.yourBalancePaise,
+      required this.yourTripSharesPaise,
+      required this.youPaidInPaise,
+      required this.youPaidOutPaise,
+      required this.payouts});
+
+  factory MoneyView.fromJson(Map<String, dynamic> j) => MoneyView(
+        paypalMode: _str(j['paypal_mode']),
+        paypalEmail: _str(j['paypal_email']),
+        businessAccountPaise: _int(j['business_account_paise']),
+        owedToEveryonePaise: _int(j['owed_to_everyone_paise']),
+        balanced: j['balanced'] == true,
+        yourBalancePaise: _int(j['your_balance_paise']),
+        yourTripSharesPaise: _int(j['your_trip_shares_paise']),
+        youPaidInPaise: _int(j['you_paid_in_paise']),
+        youPaidOutPaise: _int(j['you_paid_out_paise']),
+        payouts: _list(j['payouts'], Payout.fromJson),
       );
 }

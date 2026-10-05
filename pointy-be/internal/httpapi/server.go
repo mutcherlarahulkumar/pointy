@@ -132,6 +132,35 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 
 	// ---- you and people
 	authed("GET /api/me", func(w http.ResponseWriter, r *http.Request) (any, error) { return svc.Me(userID(r)) })
+	// ---- PayPal payouts: money leaving Pointy's business account
+	authed("PUT /api/me/paypal", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Email string `json:"email"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.SetPayPalEmail(userID(r), in.Email)
+	})
+	authed("POST /api/withdrawals", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Amount app.Paise `json:"amount_paise"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		p, err := svc.Withdraw(r.Context(), userID(r), in.Amount)
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+	})
+	authed("GET /api/payouts", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.Payouts(r.Context(), userID(r)), nil
+	})
+	authed("GET /api/money", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.Money(r.Context(), userID(r))
+	})
 	authed("GET /api/contacts", func(w http.ResponseWriter, r *http.Request) (any, error) { return svc.Contacts(userID(r)), nil })
 	authed("GET /api/users/lookup", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.LookupPhone(r.URL.Query().Get("phone"))
@@ -295,7 +324,7 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		if err := body(r, &in); err != nil {
 			return nil, err
 		}
-		return svc.AddExpense(r.PathValue("id"), userID(r), in)
+		return svc.AddExpense(r.Context(), r.PathValue("id"), userID(r), in)
 	})
 	authed("GET /api/trips/{id}/budgets", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.Budgets(r.PathValue("id"), userID(r))
@@ -324,7 +353,16 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		return svc.SettlementPreview(r.PathValue("id"), userID(r))
 	})
 	authed("POST /api/trips/{id}/settle", func(w http.ResponseWriter, r *http.Request) (any, error) {
-		return svc.Settle(r.PathValue("id"), userID(r))
+		// {"payout": true} also sends each person's part on to their PayPal.
+		var in struct {
+			Payout bool `json:"payout"`
+		}
+		if r.ContentLength != 0 {
+			if err := body(r, &in); err != nil {
+				return nil, err
+			}
+		}
+		return svc.Settle(r.Context(), r.PathValue("id"), userID(r), in.Payout)
 	})
 	authed("POST /api/trips/{id}/assistant/plan", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {

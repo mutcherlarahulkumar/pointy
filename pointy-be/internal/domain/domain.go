@@ -47,6 +47,9 @@ type User struct {
 	// AlertsSeenAt is when the person last opened their alerts, for the
 	// unread badge.
 	AlertsSeenAt time.Time `json:"-"`
+	// PayPalEmail is where Pointy pays this person out (withdrawals and
+	// settle-up refunds). Only they see it.
+	PayPalEmail string `json:"paypal_email,omitempty"`
 }
 
 // PublicUser is what other people may see about someone.
@@ -170,9 +173,11 @@ type Expense struct {
 	Description string    `json:"description"`
 	Category    Category  `json:"category"`
 	Amount      Paise     `json:"amount_paise"`
-	Mode        string    `json:"mode"`          // trip: member or reimburse; personal: transfer
-	Payee       string    `json:"payee"`         // who was paid, as shown on the receipt
-	PayeeUserID string    `json:"payee_user_id"` // the Pointy user whose balance received the money
+	Mode        string    `json:"mode"`                  // trip: member or reimburse; personal: transfer
+	Payee       string    `json:"payee"`                 // who was paid, as shown on the receipt
+	PayeeUserID string    `json:"payee_user_id"`         // the Pointy user whose balance received the money
+	PayeeEmail  string    `json:"payee_email,omitempty"` // mode paypal: the PayPal account paid
+	PayoutID    string    `json:"payout_id,omitempty"`   // mode paypal: the payout that paid it
 	Shares      []Share   `json:"shares"`
 	PlaceName   string    `json:"place_name"`
 	PlaceType   string    `json:"place_type"`
@@ -257,6 +262,24 @@ type ChatAction struct {
 
 // ChatCleared deletes a person's conversation.
 type ChatCleared struct{ UserID string }
+
+// Payout is money leaving Pointy's PayPal business account for a real
+// PayPal account: a withdrawal, a shop paid from a trip wallet, or a
+// settle-up refund.
+type Payout struct {
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`           // whose money it was (for a trip, who paid)
+	TripID      string     `json:"trip_id,omitempty"` // set when a trip wallet paid
+	Kind        string     `json:"kind"`              // withdraw, merchant, settle
+	Email       string     `json:"email"`             // the PayPal account paid
+	Description string     `json:"description"`
+	Amount      Paise      `json:"amount_paise"`
+	Status      string     `json:"status"` // sending, pending, paid, unclaimed, failed, returned
+	BatchID     string     `json:"paypal_batch_id,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	DoneAt      *time.Time `json:"done_at,omitempty"`
+}
 
 // ShopItem is a product found for the person (through Channel3), with the
 // best in-stock offer. Pointy never buys it: the person opens the shop's

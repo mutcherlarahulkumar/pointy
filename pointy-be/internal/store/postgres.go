@@ -64,9 +64,9 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 	var err error
 	switch v := it.(type) {
 	case *domain.User:
-		_, err = tx.Exec(ctx, `INSERT INTO users (id, name, phone, pin_hash, alerts_seen_at, created_at) VALUES ($1,$2,$3,$4,$5,$6)
-			ON CONFLICT (id) DO UPDATE SET name=$2, phone=$3, pin_hash=$4, alerts_seen_at=$5`,
-			v.ID, v.Name, v.Phone, v.PinHash, v.AlertsSeenAt, v.CreatedAt)
+		_, err = tx.Exec(ctx, `INSERT INTO users (id, name, phone, pin_hash, alerts_seen_at, created_at, paypal_email) VALUES ($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT (id) DO UPDATE SET name=$2, phone=$3, pin_hash=$4, alerts_seen_at=$5, paypal_email=$7`,
+			v.ID, v.Name, v.Phone, v.PinHash, v.AlertsSeenAt, v.CreatedAt, v.PayPalEmail)
 	case domain.Session:
 		_, err = tx.Exec(ctx, `INSERT INTO sessions (token_hash, user_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, v.TokenHash, v.UserID, v.CreatedAt)
 	case domain.SessionEnd:
@@ -93,10 +93,10 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 			ON CONFLICT (order_id) DO UPDATE SET status=$7`,
 			v.OrderID, v.ID, v.TripID, v.UserID, int64(v.Amount), v.ApproveURL, v.Status, v.CreatedAt)
 	case *domain.Expense:
-		_, err = tx.Exec(ctx, `INSERT INTO expenses (id, trip_id, paid_by, description, category, amount, mode, payee, payee_user_id, shares, place_name, place_type, lat, lng, at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+		_, err = tx.Exec(ctx, `INSERT INTO expenses (id, trip_id, paid_by, description, category, amount, mode, payee, payee_user_id, shares, place_name, place_type, lat, lng, at, payee_email, payout_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
 			v.ID, v.TripID, v.PaidBy, v.Description, string(v.Category), int64(v.Amount), v.Mode, v.Payee, v.PayeeUserID, js(v.Shares),
-			v.PlaceName, v.PlaceType, v.Lat, v.Lng, v.At)
+			v.PlaceName, v.PlaceType, v.Lat, v.Lng, v.At, v.PayeeEmail, v.PayoutID)
 	case *domain.DepositRequest:
 		_, err = tx.Exec(ctx, `INSERT INTO deposit_requests (id, trip_id, user_id, amount, due, status, reminders, paid_at, paid_via) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			ON CONFLICT (id) DO UPDATE SET amount=$4, due=$5, status=$6, reminders=$7, paid_at=$8, paid_via=$9`,
@@ -110,6 +110,9 @@ func save(ctx context.Context, tx pgx.Tx, it any) error {
 		_, err = tx.Exec(ctx, `INSERT INTO money_requests (id, requester_id, payer_id, amount, note, status, created_at, closed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			ON CONFLICT (id) DO UPDATE SET status=$6, closed_at=$8`,
 			v.ID, v.RequesterID, v.PayerID, int64(v.Amount), v.Note, v.Status, v.CreatedAt, v.ClosedAt)
+	case *domain.Payout:
+		_, err = tx.Exec(ctx, `INSERT INTO payouts (id, user_id, body, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET body=$3`,
+			v.ID, v.UserID, js(v), v.CreatedAt)
 	case *domain.ChatMessage:
 		_, err = tx.Exec(ctx, `INSERT INTO chat_messages (id, user_id, body, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, v.ID, v.UserID, js(v), v.At)
 	case domain.ChatCleared:
@@ -141,9 +144,9 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 	}
 	steps := []func() error{
 		func() error {
-			return q(`SELECT id, name, phone, pin_hash, alerts_seen_at, created_at FROM users ORDER BY seq`, func(r pgx.Rows) error {
+			return q(`SELECT id, name, phone, pin_hash, alerts_seen_at, created_at, paypal_email FROM users ORDER BY seq`, func(r pgx.Rows) error {
 				u := &domain.User{}
-				if err := r.Scan(&u.ID, &u.Name, &u.Phone, &u.PinHash, &u.AlertsSeenAt, &u.CreatedAt); err != nil {
+				if err := r.Scan(&u.ID, &u.Name, &u.Phone, &u.PinHash, &u.AlertsSeenAt, &u.CreatedAt, &u.PayPalEmail); err != nil {
 					return err
 				}
 				s.Users = append(s.Users, u)
@@ -225,12 +228,12 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 			})
 		},
 		func() error {
-			return q(`SELECT id, trip_id, paid_by, description, category, amount, mode, payee, payee_user_id, shares, place_name, place_type, lat, lng, at FROM expenses ORDER BY seq`, func(r pgx.Rows) error {
+			return q(`SELECT id, trip_id, paid_by, description, category, amount, mode, payee, payee_user_id, shares, place_name, place_type, lat, lng, at, payee_email, payout_id FROM expenses ORDER BY seq`, func(r pgx.Rows) error {
 				e := &domain.Expense{}
 				var cat string
 				var amt int64
 				var shares []byte
-				if err := r.Scan(&e.ID, &e.TripID, &e.PaidBy, &e.Description, &cat, &amt, &e.Mode, &e.Payee, &e.PayeeUserID, &shares, &e.PlaceName, &e.PlaceType, &e.Lat, &e.Lng, &e.At); err != nil {
+				if err := r.Scan(&e.ID, &e.TripID, &e.PaidBy, &e.Description, &cat, &amt, &e.Mode, &e.Payee, &e.PayeeUserID, &shares, &e.PlaceName, &e.PlaceType, &e.Lat, &e.Lng, &e.At, &e.PayeeEmail, &e.PayoutID); err != nil {
 					return err
 				}
 				e.Category, e.Amount = domain.Category(cat), domain.Paise(amt)
@@ -294,6 +297,20 @@ func (p *Postgres) Load(ctx context.Context) (*app.Snapshot, error) {
 				}
 				m.Amount = domain.Paise(amt)
 				s.MoneyRequests = append(s.MoneyRequests, m)
+				return nil
+			})
+		},
+		func() error {
+			return q(`SELECT body FROM payouts ORDER BY seq`, func(r pgx.Rows) error {
+				var body []byte
+				if err := r.Scan(&body); err != nil {
+					return err
+				}
+				p := &domain.Payout{}
+				if err := json.Unmarshal(body, p); err != nil {
+					return err
+				}
+				s.Payouts = append(s.Payouts, p)
 				return nil
 			})
 		},

@@ -6,11 +6,14 @@ import '../theme.dart';
 /// Your own balance: an indigo card, so it is never confused with the green
 /// trip wallet.
 class PersonalCard extends StatelessWidget {
-  const PersonalCard({super.key, required this.balancePaise, this.actions = const [], this.caption});
+  const PersonalCard({super.key, required this.balancePaise, this.actions = const [], this.caption, this.onWhere});
 
   final int balancePaise;
   final List<Widget> actions;
   final String? caption;
+
+  /// Opens "Where is my money?" from a link in the corner.
+  final VoidCallback? onWhere;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +35,23 @@ class PersonalCard extends StatelessWidget {
             children: [
               const Icon(Icons.account_balance_wallet_outlined, color: AppColors.personalBg, size: 18),
               const SizedBox(width: 8),
-              Text('Your balance', style: AppText.detail(color: AppColors.personalBg, weight: FontWeight.w600)),
+              Expanded(child: Text('Your balance', style: AppText.detail(color: AppColors.personalBg, weight: FontWeight.w600))),
+              if (onWhere != null)
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: onWhere,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.help_outline_rounded, size: 16, color: AppColors.personalBg),
+                        const SizedBox(width: 4),
+                        Text('Where is it?', overflow: TextOverflow.ellipsis, style: AppText.small(color: AppColors.personalBg, weight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -51,7 +70,7 @@ class PersonalCard extends StatelessWidget {
           if (caption != null) Text(caption!, style: AppText.small(color: AppColors.personalBg)),
           if (actions.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Row(children: [for (var i = 0; i < actions.length; i++) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: actions[i])]]),
+            Row(children: [for (var i = 0; i < actions.length; i++) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: actions[i])]]),
           ],
         ],
       ),

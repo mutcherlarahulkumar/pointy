@@ -1,6 +1,6 @@
 # Pointy
 
-Pay friends, request money, split bills and run shared trip wallets — an Android app (Flutter) and a Go backend on Render with Postgres. Money comes in through PayPal checkout (sandbox); everything else moves instantly inside Pointy's ledger, which is what works in India.
+Pay friends, request money, split bills and run shared trip wallets — an Android app (Flutter) and a Go backend on Render with Postgres. Money comes in through PayPal checkout and goes out through PayPal Payouts (sandbox), from one Pointy business account; between people it moves instantly inside Pointy's ledger. Profile → **Where is my money?** shows the whole path.
 
 | Folder | What |
 |---|---|
@@ -30,6 +30,8 @@ The backend service needs these environment variables:
 | `PAYPAL_CURRENCY` | `USD` |
 | `POINTY_INR_PER_UNIT` | `85` (rupees per dollar used for conversion) |
 | `PAYPAL_WEBHOOK_ID` | optional |
+
+For withdrawals and trip payments, turn on **Payouts** for the sandbox REST app and give the sandbox business account a balance.
 | `GROQ_API_KEY` | optional: turns on AI trip summaries, the free-form deposit assistant, receipt scanning and the Pointy AI assistant (Groq) |
 | `CHANNEL3_API_KEY` | optional: lets Pointy AI find things to buy ("find sunscreen under 1500") through [Channel3](https://trychannel3.com) product search |
 | `POINTY_AI_MODEL` | optional, default `openai/gpt-oss-120b` |
@@ -48,8 +50,9 @@ The server applies pending database migrations when it starts, so nothing extra 
 5. A: **Split bill** → ₹1,200 dinner → add B → B gets a request for ₹600.
 6. A: **Trips → Plan a trip** with B, ₹3,000 each → the assistant drafts → **Send 1 request**.
 7. B: Trips → the trip → Deposits → **You owe ₹3,000** → pay from balance or PayPal.
-8. B: **Add an expense** → ₹1,840 dinner, "I paid already" → split equally → budget warning → Pay anyway. B is paid back ₹1,840.
-9. A: **Settle up** → what is left goes back to both balances. Check History on both phones.
+8. B: trip **Overview → Pay from the trip** → ₹1,840 dinner → **Pay a shop or person by PayPal** with a sandbox personal email → split equally → budget warning → Pay anyway. The PayPal reference is on the receipt; the money left the business account.
+9. A and B: Profile → **PayPal for payouts** → a sandbox personal email.
+10. A: **Settle up** with **Send to PayPal** on → what is left is paid out to both PayPal accounts. A: Home → **Withdraw** sends balance to PayPal too. **Where is it?** on the balance card shows the business account and that the books match.
 
 ## Development
 

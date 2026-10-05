@@ -1,7 +1,8 @@
 # Pointy — handoff for Claude Code / Cowork
 
 > **Current state (read first).** Since this brief was written the project changed course; where it disagrees with the sections below, this note wins.
-> - **India:** PayPal does not pay between Indian accounts and Payouts is not offered in India. PayPal is used **only for adding money** (Orders API checkout, US sandbox business account, USD). Payments between people, splits, trip expenses, refunds and deposit requests move inside Pointy's ledger. No payouts, no invoices, no UPI QR.
+> - **Money flow:** one US sandbox PayPal business account (USD, shown in rupees; PayPal does not pay between Indian accounts). **In:** Orders API checkout. **Out:** Payouts — withdraw to your PayPal, a trip paying a shop by PayPal (`mode: paypal`), settle-up refunds to each person's PayPal. **Inside:** friend payments, requests, splits and trip deposits from balance are ledger entries. `GET /api/money` checks the business account equals what is owed. No invoices, no UPI QR.
+> - **Trips UI:** tabs Overview (four numbered steps), Money in, Spent, Budget.
 > - **Accounts:** phone + 6-digit PIN, bearer tokens. The `X-User-Id` header and demo users are gone; there is no seed data and the clock is real (IST).
 > - **Storage:** Postgres via `DATABASE_URL` (`internal/store`), in-memory working copy, every change saved in one transaction. One instance per database.
 > - **New features:** pay a friend by phone or Pointy QR, money requests, split a bill, top-ups, trip members by phone, deposits from balance or PayPal, `reimburse` / `member` trip expenses, settle into balances, unread alerts.

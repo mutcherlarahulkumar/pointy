@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ const (
 	ModeMember    = "member"    // the trip wallet pays someone on Pointy
 	ModeReimburse = "reimburse" // you already paid (cash, UPI, card); the wallet pays you back
 	ModeTransfer  = "transfer"  // a personal payment to another Pointy user
+	ModePayPal    = "paypal"    // the trip wallet pays a shop's or person's PayPal account (a real payout)
 )
 
 type ExpenseInput struct {
@@ -21,6 +23,7 @@ type ExpenseInput struct {
 	Mode              string              `json:"mode"`
 	Payee             string              `json:"payee"`         // shop or person name, for the receipt
 	PayeeUserID       string              `json:"payee_user_id"` // who receives the money (mode member / personal)
+	PayeeEmail        string              `json:"payee_email"`   // mode paypal: the PayPal account to pay
 	Method            domain.SplitMethod  `json:"split_method"`
 	Participants      []domain.SplitInput `json:"participants"`
 	PlaceName         string              `json:"place_name"`
@@ -61,18 +64,63 @@ func (s *Service) spentL(tripID string, cat domain.Category) (sum Paise) {
 	return sum
 }
 
-// AddExpense pays from a trip wallet and splits the cost. With mode
-// "member" the money goes into a Pointy user's balance; with "reimburse" it
-// goes back to the person who already paid the shop in cash, UPI or card.
-func (s *Service) AddExpense(tripID, userID string, in ExpenseInput) (*domain.Expense, error) {
+// AddExpense pays from a trip wallet and splits the cost.
+//   - mode "paypal": the wallet pays a shop's or person's PayPal account. A
+//     real payout leaves Pointy's business account; the shares are held
+//     while PayPal is called and nothing is written if it refuses.
+//   - mode "member": the money goes into a Pointy user's balance.
+//   - mode "reimburse": it goes back to the person who already paid the shop
+//     in cash, UPI or card.
+func (s *Service) AddExpense(ctx context.Context, tripID, userID string, in ExpenseInput) (*domain.Expense, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	t, shares, check, err := s.prepareExpenseL(tripID, userID, &in)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if in.Mode != ModePayPal {
+		defer s.mu.Unlock()
+		e, err := s.recordExpenseL(t, userID, in, shares, check, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.commitL(); err != nil {
+			return nil, err
+		}
+		return e, nil
+	}
+	debits := map[string]Paise{}
+	for _, sh := range shares {
+		debits[domain.ShareAccount(tripID, sh.UserID)] += sh.Amount
+	}
+	p := &domain.Payout{ID: newID("po"), UserID: userID, TripID: tripID, Kind: PayoutMerchant, Email: in.PayeeEmail,
+		Description: in.Description + " · " + t.Name, Amount: in.Amount, Status: "sending", CreatedAt: s.now()}
+	s.mu.Unlock()
+	var e *domain.Expense
+	err = s.payOut(ctx, p, debits, domain.ClearingAccount(tripID), func() error {
+		var rerr error
+		e, rerr = s.recordExpenseL(t, userID, in, shares, check, p)
+		return rerr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// prepareExpenseL checks an expense and works out the shares. Nothing is
+// written.
+func (s *Service) prepareExpenseL(tripID, userID string, in *ExpenseInput) (*domain.Trip, []domain.Share, domain.BudgetCheck, error) {
+	var none domain.BudgetCheck
 	t, err := s.openTripL(tripID, userID)
 	if err == nil {
 		err = in.normalise(s.now())
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, none, err
+	}
+	if s.holdsOnTripL(tripID) && in.Mode == ModePayPal {
+		return nil, nil, none, domain.Conflict("payment_in_progress", "another PayPal payment from this trip is still going through; try again in a moment", nil)
 	}
 	if in.Mode == "" {
 		in.Mode = ModeReimburse
@@ -82,10 +130,19 @@ func (s *Service) AddExpense(tripID, userID string, in ExpenseInput) (*domain.Ex
 		in.PayeeUserID = userID
 	case ModeMember:
 		if _, ok := s.users[in.PayeeUserID]; !ok {
-			return nil, domain.Invalid("choose who on Pointy gets the money")
+			return nil, nil, none, domain.Invalid("choose who on Pointy gets the money")
+		}
+	case ModePayPal:
+		email, err := checkEmail(in.PayeeEmail)
+		if err != nil {
+			return nil, nil, none, err
+		}
+		in.PayeeEmail, in.PayeeUserID = email, ""
+		if in.Payee == "" {
+			in.Payee = email
 		}
 	default:
-		return nil, domain.Invalid("mode must be %q or %q", ModeMember, ModeReimburse)
+		return nil, nil, none, domain.Invalid("mode must be %q, %q or %q", ModePayPal, ModeMember, ModeReimburse)
 	}
 	if in.Payee == "" {
 		in.Payee = s.name(in.PayeeUserID)
@@ -97,37 +154,54 @@ func (s *Service) AddExpense(tripID, userID string, in ExpenseInput) (*domain.Ex
 	}
 	for _, p := range in.Participants {
 		if !t.HasMember(p.UserID) {
-			return nil, domain.Invalid("%q is not on this trip", p.UserID)
+			return nil, nil, none, domain.Invalid("%q is not on this trip", p.UserID)
 		}
 	}
 	shares, err := domain.Split(in.Amount, in.Method, in.Participants)
 	if err != nil {
-		return nil, err
+		return nil, nil, none, err
 	}
 	for _, sh := range shares {
-		if avail := s.ledger.Owed(domain.ShareAccount(tripID, sh.UserID)); avail < sh.Amount {
-			return nil, domain.Conflict("insufficient_share", s.name(sh.UserID)+" has "+INR(avail)+" left in their share but this needs "+INR(sh.Amount),
+		if avail := s.availL(domain.ShareAccount(tripID, sh.UserID)); avail < sh.Amount {
+			return nil, nil, none, domain.Conflict("insufficient_share", s.name(sh.UserID)+" has "+INR(avail)+" left in their share but this needs "+INR(sh.Amount),
 				map[string]any{"user_id": sh.UserID, "available_paise": avail, "needed_paise": sh.Amount})
 		}
 	}
 	check := domain.CheckBudget(in.Category, t.Budgets[in.Category], s.spentL(tripID, in.Category), in.Amount)
 	if check.Warn && !in.ConfirmOverBudget {
-		return nil, domain.Conflict("budget_warning", "this payment takes the "+string(in.Category)+" budget to "+itoa(check.PercentAfter)+"%. Send it again with confirm_over_budget to pay anyway", check)
+		return nil, nil, none, domain.Conflict("budget_warning", "this payment takes the "+string(in.Category)+" budget to "+itoa(check.PercentAfter)+"%. Send it again with confirm_over_budget to pay anyway", check)
 	}
+	return t, shares, check, nil
+}
+
+// recordExpenseL writes the expense. For a PayPal payment the money has
+// already left through the payout entry; otherwise it moves from the
+// shares into the payee's balance here. The caller commits.
+func (s *Service) recordExpenseL(t *domain.Trip, userID string, in ExpenseInput, shares []domain.Share, check domain.BudgetCheck, p *domain.Payout) (*domain.Expense, error) {
 	id := s.idL("exp")
-	debits := map[string]Paise{}
-	for _, sh := range shares {
-		debits[sh.UserID] += sh.Amount
+	if p == nil {
+		debits := map[string]Paise{}
+		for _, sh := range shares {
+			debits[sh.UserID] += sh.Amount
+		}
+		if err := s.tripToBalancesL(t, "spend", id, *in.At, debits, map[string]Paise{in.PayeeUserID: in.Amount}); err != nil {
+			return nil, err
+		}
 	}
-	if err := s.tripToBalancesL(t, "spend", id, *in.At, debits, map[string]Paise{in.PayeeUserID: in.Amount}); err != nil {
-		return nil, err
+	e := &domain.Expense{ID: id, TripID: t.ID, PaidBy: userID, Description: in.Description, Category: in.Category, Amount: in.Amount, Mode: in.Mode,
+		Payee: in.Payee, PayeeUserID: in.PayeeUserID, PayeeEmail: in.PayeeEmail, Shares: shares, PlaceName: in.PlaceName, PlaceType: in.PlaceType,
+		Lat: in.Lat, Lng: in.Lng, At: *in.At}
+	if p != nil {
+		e.PayoutID = p.ID
 	}
-	e := &domain.Expense{ID: id, TripID: tripID, PaidBy: userID, Description: in.Description, Category: in.Category, Amount: in.Amount, Mode: in.Mode,
-		Payee: in.Payee, PayeeUserID: in.PayeeUserID, Shares: shares, PlaceName: in.PlaceName, PlaceType: in.PlaceType, Lat: in.Lat, Lng: in.Lng, At: *in.At}
 	s.expenses = append(s.expenses, e)
 	s.track(e)
 
-	s.alertL(tripID, "", "payment", firstNonEmpty(in.Description, in.Payee)+" · "+INR(in.Amount), "Paid from the "+t.Name+" wallet by "+s.name(userID))
+	how := "Paid from the " + t.Name + " wallet by " + s.name(userID)
+	if p != nil {
+		how = "Sent by PayPal to " + in.PayeeEmail + " from the " + t.Name + " wallet"
+	}
+	s.alertL(t.ID, "", "payment", firstNonEmpty(in.Description, in.Payee)+" · "+INR(in.Amount), how)
 	if in.Mode == ModeMember && in.PayeeUserID != userID {
 		s.alertL("", in.PayeeUserID, "money", "You got "+INR(in.Amount)+" from "+t.Name, in.Description)
 	}
@@ -137,15 +211,12 @@ func (s *Service) AddExpense(tripID, userID string, in ExpenseInput) (*domain.Ex
 		if check.Over100 {
 			body = INR(-check.Left) + " over the budget"
 		}
-		s.alertL(tripID, "", "budget", title, body)
+		s.alertL(t.ID, "", "budget", title, body)
 	}
 	for _, sh := range shares {
-		if left := s.ledger.Owed(domain.ShareAccount(tripID, sh.UserID)); left < LowShare {
-			s.alertL(tripID, sh.UserID, "share", "Your "+t.Name+" share is low", INR(left)+" left. Add money from the Wallet tab")
+		if left := s.ledger.Owed(domain.ShareAccount(t.ID, sh.UserID)); left < LowShare {
+			s.alertL(t.ID, sh.UserID, "share", "Your "+t.Name+" share is low", INR(left)+" left. Put money in from the trip's Overview")
 		}
-	}
-	if err := s.commitL(); err != nil {
-		return nil, err
 	}
 	return e, nil
 }
@@ -180,7 +251,7 @@ func (s *Service) PayPersonal(userID string, in ExpenseInput) (*domain.Expense, 
 // caller commits.
 func (s *Service) transferL(from, to string, in ExpenseInput, alertTitle string) (*domain.Expense, error) {
 	acc := domain.PersonalAccount(from)
-	if bal := s.ledger.Owed(acc); bal < in.Amount {
+	if bal := s.availL(acc); bal < in.Amount {
 		return nil, domain.Conflict("insufficient_balance", "your balance is "+INR(bal)+"; add money first", map[string]any{"balance_paise": bal})
 	}
 	id := s.idL("exp")

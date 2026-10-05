@@ -260,7 +260,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   String _channel(PlanItem it) => switch (it.channel) {
         'already_paid' => 'Already paid',
-        'organiser' => 'You · add it from the Wallet tab',
+        'organiser' => 'You · put it in from the Overview tab',
         _ => 'Gets a request on their phone',
       };
 }
