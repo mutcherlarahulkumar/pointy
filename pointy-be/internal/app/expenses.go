@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +12,9 @@ const (
 	ModeMember    = "member"    // the trip wallet pays someone on Pointy
 	ModeReimburse = "reimburse" // you already paid (cash, UPI, card); the wallet pays you back
 	ModeTransfer  = "transfer"  // a personal payment to another Pointy user
-	ModePayPal    = "paypal"    // the trip wallet pays a shop's or person's PayPal account (a real payout)
+	// ModePayPal: older trip payments sent by PayPal. No longer accepted;
+	// kept so their history still reads right.
+	ModePayPal = "paypal"
 )
 
 type ExpenseInput struct {
@@ -23,7 +24,6 @@ type ExpenseInput struct {
 	Mode              string              `json:"mode"`
 	Payee             string              `json:"payee"`         // shop or person name, for the receipt
 	PayeeUserID       string              `json:"payee_user_id"` // who receives the money (mode member / personal)
-	PayeeEmail        string              `json:"payee_email"`   // mode paypal: the PayPal account to pay
 	Method            domain.SplitMethod  `json:"split_method"`
 	Participants      []domain.SplitInput `json:"participants"`
 	PlaceName         string              `json:"place_name"`
@@ -64,45 +64,23 @@ func (s *Service) spentL(tripID string, cat domain.Category) (sum Paise) {
 	return sum
 }
 
-// AddExpense pays from a trip wallet and splits the cost.
-//   - mode "paypal": the wallet pays a shop's or person's PayPal account. A
-//     real payout leaves Pointy's business account; the shares are held
-//     while PayPal is called and nothing is written if it refuses.
+// AddExpense pays from a trip wallet and splits the cost. The trip is a
+// wallet inside Pointy, so the money moves between Pointy balances:
 //   - mode "member": the money goes into a Pointy user's balance.
 //   - mode "reimburse": it goes back to the person who already paid the shop
 //     in cash, UPI or card.
-func (s *Service) AddExpense(ctx context.Context, tripID, userID string, in ExpenseInput) (*domain.Expense, error) {
+func (s *Service) AddExpense(tripID, userID string, in ExpenseInput) (*domain.Expense, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	t, shares, check, err := s.prepareExpenseL(tripID, userID, &in)
 	if err != nil {
-		s.mu.Unlock()
 		return nil, err
 	}
-	if in.Mode != ModePayPal {
-		defer s.mu.Unlock()
-		e, err := s.recordExpenseL(t, userID, in, shares, check, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.commitL(); err != nil {
-			return nil, err
-		}
-		return e, nil
-	}
-	debits := map[string]Paise{}
-	for _, sh := range shares {
-		debits[domain.ShareAccount(tripID, sh.UserID)] += sh.Amount
-	}
-	p := &domain.Payout{ID: newID("po"), UserID: userID, TripID: tripID, Kind: PayoutMerchant, Email: in.PayeeEmail,
-		Description: in.Description + " · " + t.Name, Amount: in.Amount, Status: "sending", CreatedAt: s.now()}
-	s.mu.Unlock()
-	var e *domain.Expense
-	err = s.payOut(ctx, p, debits, domain.ClearingAccount(tripID), func() error {
-		var rerr error
-		e, rerr = s.recordExpenseL(t, userID, in, shares, check, p)
-		return rerr
-	})
+	e, err := s.recordExpenseL(t, userID, in, shares, check)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.commitL(); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -119,9 +97,6 @@ func (s *Service) prepareExpenseL(tripID, userID string, in *ExpenseInput) (*dom
 	if err != nil {
 		return nil, nil, none, err
 	}
-	if s.holdsOnTripL(tripID) && in.Mode == ModePayPal {
-		return nil, nil, none, domain.Conflict("payment_in_progress", "another PayPal payment from this trip is still going through; try again in a moment", nil)
-	}
 	if in.Mode == "" {
 		in.Mode = ModeReimburse
 	}
@@ -132,17 +107,8 @@ func (s *Service) prepareExpenseL(tripID, userID string, in *ExpenseInput) (*dom
 		if _, ok := s.users[in.PayeeUserID]; !ok {
 			return nil, nil, none, domain.Invalid("choose who on Pointy gets the money")
 		}
-	case ModePayPal:
-		email, err := checkEmail(in.PayeeEmail)
-		if err != nil {
-			return nil, nil, none, err
-		}
-		in.PayeeEmail, in.PayeeUserID = email, ""
-		if in.Payee == "" {
-			in.Payee = email
-		}
 	default:
-		return nil, nil, none, domain.Invalid("mode must be %q, %q or %q", ModePayPal, ModeMember, ModeReimburse)
+		return nil, nil, none, domain.Invalid("mode must be %q or %q", ModeMember, ModeReimburse)
 	}
 	if in.Payee == "" {
 		in.Payee = s.name(in.PayeeUserID)
@@ -174,33 +140,24 @@ func (s *Service) prepareExpenseL(tripID, userID string, in *ExpenseInput) (*dom
 	return t, shares, check, nil
 }
 
-// recordExpenseL writes the expense. For a PayPal payment the money has
-// already left through the payout entry; otherwise it moves from the
-// shares into the payee's balance here. The caller commits.
-func (s *Service) recordExpenseL(t *domain.Trip, userID string, in ExpenseInput, shares []domain.Share, check domain.BudgetCheck, p *domain.Payout) (*domain.Expense, error) {
+// recordExpenseL moves the money from the shares into the payee's balance
+// and writes the expense. The caller commits.
+func (s *Service) recordExpenseL(t *domain.Trip, userID string, in ExpenseInput, shares []domain.Share, check domain.BudgetCheck) (*domain.Expense, error) {
 	id := s.idL("exp")
-	if p == nil {
-		debits := map[string]Paise{}
-		for _, sh := range shares {
-			debits[sh.UserID] += sh.Amount
-		}
-		if err := s.tripToBalancesL(t, "spend", id, *in.At, debits, map[string]Paise{in.PayeeUserID: in.Amount}); err != nil {
-			return nil, err
-		}
+	debits := map[string]Paise{}
+	for _, sh := range shares {
+		debits[sh.UserID] += sh.Amount
+	}
+	if err := s.tripToBalancesL(t, "spend", id, *in.At, debits, map[string]Paise{in.PayeeUserID: in.Amount}); err != nil {
+		return nil, err
 	}
 	e := &domain.Expense{ID: id, TripID: t.ID, PaidBy: userID, Description: in.Description, Category: in.Category, Amount: in.Amount, Mode: in.Mode,
-		Payee: in.Payee, PayeeUserID: in.PayeeUserID, PayeeEmail: in.PayeeEmail, Shares: shares, PlaceName: in.PlaceName, PlaceType: in.PlaceType,
+		Payee: in.Payee, PayeeUserID: in.PayeeUserID, Shares: shares, PlaceName: in.PlaceName, PlaceType: in.PlaceType,
 		Lat: in.Lat, Lng: in.Lng, At: *in.At}
-	if p != nil {
-		e.PayoutID = p.ID
-	}
 	s.expenses = append(s.expenses, e)
 	s.track(e)
 
 	how := "Paid from the " + t.Name + " wallet by " + s.name(userID)
-	if p != nil {
-		how = "Sent by PayPal to " + in.PayeeEmail + " from the " + t.Name + " wallet"
-	}
 	s.alertL(t.ID, "", "payment", firstNonEmpty(in.Description, in.Payee)+" · "+INR(in.Amount), how)
 	if in.Mode == ModeMember && in.PayeeUserID != userID {
 		s.alertL("", in.PayeeUserID, "money", "You got "+INR(in.Amount)+" from "+t.Name, in.Description)

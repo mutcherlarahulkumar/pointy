@@ -135,11 +135,15 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		t.Fatal("Dev should see the trip")
 	}
 
-	// The assistant drafts, Asha confirms, Dev pays his request with PayPal.
+	// The assistant drafts, Asha confirms, both pay their request from their balance (Dev adds money with PayPal first).
 	plan := call(asha, "POST", "/api/trips/"+tripID+"/assistant/plan", map[string]any{"instruction": "Collect ₹3,000 from everyone by 20 Oct"}, 201)
 	call(asha, "POST", "/api/trips/"+tripID+"/assistant/plans/"+plan["id"].(string)+"/confirm", nil, 201)
-	call(asha, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000, "source": "balance"}, 201)
-	devDep := call(dev, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000}, 201)
+	call(asha, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000}, 201)
+	// Dev has no balance yet: the trip only takes money from a balance.
+	if call(dev, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000}, 409)["error"].(map[string]any)["code"] != "insufficient_balance" {
+		t.Fatal("expected insufficient_balance")
+	}
+	devDep := call(dev, "POST", "/api/topups", map[string]any{"amount_paise": 300000}, 201)
 
 	// Pointy AI answers from the database and keeps the conversation.
 	turn := call(asha, "POST", "/api/assistant/messages", map[string]string{"text": "what's my balance?"}, 201)["list"].([]any)
@@ -160,6 +164,7 @@ func TestTwoPhonesEndToEnd(t *testing.T) {
 		t.Fatalf("history not cleared: %d", n)
 	}
 	call(dev, "POST", fmt.Sprintf("/api/deposits/%s/capture", devDep["paypal_order_id"]), nil, 201)
+	call(dev, "POST", "/api/trips/"+tripID+"/deposits", map[string]any{"amount_paise": 300000}, 201)
 	reqs := call(asha, "GET", "/api/trips/"+tripID+"/requests", nil, 200)["list"].([]any)
 	if reqs[0].(map[string]any)["status"] != "paid" {
 		t.Fatalf("Dev's request should be paid: %v", reqs[0])

@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,12 +12,10 @@ import (
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
 )
 
-// Payout kinds.
-const (
-	PayoutWithdraw = "withdraw" // your balance to your PayPal
-	PayoutMerchant = "merchant" // a trip wallet pays a shop's or person's PayPal
-	PayoutSettle   = "settle"   // what is left of a trip, back to your PayPal
-)
+// PayoutWithdraw is the only payout Pointy makes: your balance to your
+// PayPal, from where you move it to your bank. Everything else (friends,
+// trips, settle-up) stays inside Pointy's wallet.
+const PayoutWithdraw = "withdraw"
 
 var reEmail = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
@@ -57,26 +54,12 @@ func (s *Service) SetPayPalEmail(userID, email string) (Me, error) {
 }
 
 // availL is what an account can spend right now: its balance less any
-// money held for a payout on its way to PayPal.
+// money held for a withdrawal on its way to PayPal.
 func (s *Service) availL(account string) Paise { return s.ledger.Owed(account) - s.holds[account] }
 
-// holdsOnTripL says whether a payout from this trip is still being sent.
-func (s *Service) holdsOnTripL(tripID string) bool {
-	prefix := "share:" + tripID + ":"
-	for acc, v := range s.holds {
-		if v > 0 && strings.HasPrefix(acc, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// Withdraw pays money from your Pointy balance to your PayPal account.
+// Withdraw pays money from your Pointy balance to your PayPal account, from
+// where you move it to your bank.
 func (s *Service) Withdraw(ctx context.Context, userID string, amount Paise) (*domain.Payout, error) {
-	return s.withdraw(ctx, userID, amount, PayoutWithdraw, "", "Withdrawal to PayPal")
-}
-
-func (s *Service) withdraw(ctx context.Context, userID string, amount Paise, kind, tripID, what string) (*domain.Payout, error) {
 	if err := checkAmount(amount); err != nil {
 		return nil, err
 	}
@@ -95,25 +78,21 @@ func (s *Service) withdraw(ctx context.Context, userID string, amount Paise, kin
 		s.mu.Unlock()
 		return nil, domain.Conflict("insufficient_balance", "your balance is "+INR(avail)+"; you can withdraw up to that", map[string]any{"balance_paise": avail})
 	}
-	p := &domain.Payout{ID: newID("po"), UserID: userID, TripID: tripID, Kind: kind, Email: u.PayPalEmail, Description: what, Amount: amount, Status: "sending", CreatedAt: s.now()}
+	p := &domain.Payout{ID: newID("po"), UserID: userID, Kind: PayoutWithdraw, Email: u.PayPalEmail, Description: "Withdrawal from Pointy", Amount: amount, Status: "sending", CreatedAt: s.now()}
 	s.mu.Unlock()
-	if err := s.payOut(ctx, p, map[string]Paise{acc: amount}, domain.PersonalClearing, nil); err != nil {
+	if err := s.payOut(ctx, p, acc); err != nil {
 		return p, err
 	}
 	return p, nil
 }
 
-// payOut sends p through PayPal. The debits (liability accounts: a
-// balance, trip shares) are held while PayPal is called, so the money
-// cannot be spent twice. When PayPal accepts, one balanced entry moves the
-// money out of the business account (credit clearing) and done runs under
-// the lock before the commit; when it refuses, nothing is posted, the hold
-// is released and the payout is kept as failed.
-func (s *Service) payOut(ctx context.Context, p *domain.Payout, debits map[string]Paise, clearing string, done func() error) error {
+// payOut sends p through PayPal. The money is held in the balance while
+// PayPal is called, so it cannot be spent twice. When PayPal accepts, one
+// balanced entry moves it out of the business account; when it refuses,
+// nothing is posted, the hold is released and the payout is kept as failed.
+func (s *Service) payOut(ctx context.Context, p *domain.Payout, acc string) error {
 	s.mu.Lock()
-	for acc, v := range debits {
-		s.holds[acc] += v
-	}
+	s.holds[acc] += p.Amount
 	s.mu.Unlock()
 
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -122,10 +101,8 @@ func (s *Service) payOut(ctx context.Context, p *domain.Payout, debits map[strin
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for acc, v := range debits {
-		if s.holds[acc] -= v; s.holds[acc] <= 0 {
-			delete(s.holds, acc)
-		}
+	if s.holds[acc] -= p.Amount; s.holds[acc] <= 0 {
+		delete(s.holds, acc)
 	}
 	if perr != nil {
 		log.Printf("payout %s to %s: %v", p.ID, p.Email, perr)
@@ -136,38 +113,15 @@ func (s *Service) payOut(ctx context.Context, p *domain.Payout, debits map[strin
 		return &domain.Error{Status: http.StatusBadGateway, Code: "paypal_error",
 			Message: "PayPal did not accept the payout, so nothing was sent and your money is still in Pointy. Check the PayPal email, or that Payouts is on for the sandbox app."}
 	}
-	postings := make([]domain.Posting, 0, len(debits)+1)
-	accs := make([]string, 0, len(debits))
-	for acc := range debits {
-		accs = append(accs, acc)
-	}
-	sort.Strings(accs) // a stable order for the journal
-	for _, acc := range accs {
-		postings = append(postings, domain.Posting{Account: acc, Debit: debits[acc]})
-	}
-	postings = append(postings, domain.Posting{Account: clearing, Credit: p.Amount})
-	// A trip paying a shop is spending (it counts in the trip's totals and
-	// insights); anything else is money going out to its owner.
-	kind := "payout"
-	if p.Kind == PayoutMerchant {
-		kind = "spend"
-	}
-	if err := s.postL(domain.Entry{ID: s.idL("je"), Kind: kind, TripID: p.TripID, Ref: p.ID, At: s.now(), Postings: postings}); err != nil {
+	postings := []domain.Posting{{Account: acc, Debit: p.Amount}, {Account: domain.PersonalClearing, Credit: p.Amount}}
+	if err := s.postL(domain.Entry{ID: s.idL("je"), Kind: "payout", Ref: p.ID, At: s.now(), Postings: postings}); err != nil {
 		return err
 	}
 	p.BatchID = res.BatchID
 	s.setPayoutStatusL(p, res.Status)
 	s.payouts = append(s.payouts, p)
 	s.track(p)
-	if done != nil {
-		if err := done(); err != nil {
-			return err
-		}
-	}
-	switch p.Kind {
-	case PayoutWithdraw, PayoutSettle:
-		s.alertL("", p.UserID, "money", INR(p.Amount)+" sent to your PayPal", p.Email+" · "+payoutWords(p.Status))
-	}
+	s.alertL("", p.UserID, "money", INR(p.Amount)+" sent to your PayPal", p.Email+" · "+payoutWords(p.Status))
 	return s.commitL()
 }
 
@@ -201,7 +155,7 @@ func payoutWords(status string) string {
 
 // RefreshPayouts asks PayPal about payouts still on their way. A payout
 // PayPal sends back (failed, returned, blocked) is given back: the payout
-// entry is reversed, so the money is spendable again where it came from.
+// entry is reversed, so the money is back in the person's balance.
 func (s *Service) RefreshPayouts(ctx context.Context, userID string) {
 	s.mu.Lock()
 	var open []*domain.Payout
@@ -252,20 +206,19 @@ func (s *Service) reversePayoutL(p *domain.Payout) {
 		}
 		where := "your balance"
 		if p.TripID != "" {
-			where = "the trip wallet"
+			where = "the trip wallet" // payouts made before trips went wallet-only
 		}
 		s.alertL(p.TripID, p.UserID, "money", "PayPal sent back "+INR(p.Amount), "It is back in "+where+". Check the PayPal email "+p.Email)
 		return
 	}
 }
 
-// payoutsForL is the person's own payouts and those paid from their trips,
-// newest first.
+// payoutsForL is the person's own withdrawals, newest first.
 func (s *Service) payoutsForL(userID string) []*domain.Payout {
 	var out []*domain.Payout
 	for i := len(s.payouts) - 1; i >= 0; i-- {
 		p := s.payouts[i]
-		if p.UserID == userID || (p.TripID != "" && s.trips[p.TripID] != nil && s.trips[p.TripID].HasMember(userID)) {
+		if p.UserID == userID && p.Kind == PayoutWithdraw {
 			out = append(out, p)
 		}
 	}
@@ -291,7 +244,7 @@ type MoneyView struct {
 	YourBalance     Paise            `json:"your_balance_paise"`
 	YourTripShares  Paise            `json:"your_trip_shares_paise"`
 	YouPaidIn       Paise            `json:"you_paid_in_paise"`  // your PayPal checkouts
-	YouPaidOut      Paise            `json:"you_paid_out_paise"` // payouts to your PayPal
+	YouPaidOut      Paise            `json:"you_paid_out_paise"` // your withdrawals
 	Payouts         []*domain.Payout `json:"payouts"`
 }
 
@@ -335,7 +288,7 @@ func (s *Service) Money(ctx context.Context, userID string) (MoneyView, error) {
 		}
 	}
 	for _, p := range s.payouts {
-		if p.UserID == userID && p.Kind != PayoutMerchant && p.Status != "failed" && p.Status != "returned" {
+		if p.UserID == userID && p.Kind == PayoutWithdraw && p.Status != "failed" && p.Status != "returned" {
 			v.YouPaidOut += p.Amount
 		}
 	}

@@ -57,7 +57,7 @@ func spendOnTrip(t *testing.T, s *Service, trip, who string) {
 	t.Helper()
 	topUp(t, s, who, 3000)
 	must[TripView](t)(s.DepositFromBalance(trip, who, domain.Rupees(3000)))
-	must[*domain.Expense](t)(s.AddExpense(context.Background(), trip, who, ExpenseInput{Description: "Taxi", Category: domain.Transport, Amount: domain.Rupees(600), Mode: ModeReimburse}))
+	must[*domain.Expense](t)(s.AddExpense(trip, who, ExpenseInput{Description: "Taxi", Category: domain.Transport, Amount: domain.Rupees(600), Mode: ModeReimburse}))
 }
 
 func TestInsightsUseTheModelAndCacheIt(t *testing.T) {
@@ -80,7 +80,7 @@ func TestInsightsUseTheModelAndCacheIt(t *testing.T) {
 	if f.summaries != 1 {
 		t.Fatal("unchanged numbers should reuse the cached summary")
 	}
-	must[*domain.Expense](t)(s.AddExpense(context.Background(), trip, a, ExpenseInput{Description: "Chai", Category: domain.Food, Amount: domain.Rupees(100), Mode: ModeReimburse}))
+	must[*domain.Expense](t)(s.AddExpense(trip, a, ExpenseInput{Description: "Chai", Category: domain.Food, Amount: domain.Rupees(100), Mode: ModeReimburse}))
 	must[Insights](t)(s.Insights(context.Background(), trip, a))
 	if f.summaries != 2 {
 		t.Fatal("new spending should ask for a fresh summary")

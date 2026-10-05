@@ -306,15 +306,12 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 	authed("POST /api/trips/{id}/deposits", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
 			Amount domain.Paise `json:"amount_paise"`
-			Source string       `json:"source"` // paypal (default) or balance
 		}
 		if err := body(r, &in); err != nil {
 			return nil, err
 		}
-		if in.Source == "balance" {
-			return svc.DepositFromBalance(r.PathValue("id"), userID(r), in.Amount)
-		}
-		return svc.StartDeposit(r.Context(), r.PathValue("id"), userID(r), in.Amount)
+		// A trip is a wallet inside Pointy: money comes from your balance.
+		return svc.DepositFromBalance(r.PathValue("id"), userID(r), in.Amount)
 	})
 	authed("GET /api/trips/{id}/expenses", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.Expenses(r.PathValue("id"), userID(r))
@@ -324,7 +321,7 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		if err := body(r, &in); err != nil {
 			return nil, err
 		}
-		return svc.AddExpense(r.Context(), r.PathValue("id"), userID(r), in)
+		return svc.AddExpense(r.PathValue("id"), userID(r), in)
 	})
 	authed("GET /api/trips/{id}/budgets", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.Budgets(r.PathValue("id"), userID(r))
@@ -353,16 +350,7 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 		return svc.SettlementPreview(r.PathValue("id"), userID(r))
 	})
 	authed("POST /api/trips/{id}/settle", func(w http.ResponseWriter, r *http.Request) (any, error) {
-		// {"payout": true} also sends each person's part on to their PayPal.
-		var in struct {
-			Payout bool `json:"payout"`
-		}
-		if r.ContentLength != 0 {
-			if err := body(r, &in); err != nil {
-				return nil, err
-			}
-		}
-		return svc.Settle(r.Context(), r.PathValue("id"), userID(r), in.Payout)
+		return svc.Settle(r.PathValue("id"), userID(r))
 	})
 	authed("POST /api/trips/{id}/assistant/plan", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
