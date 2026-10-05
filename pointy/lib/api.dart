@@ -129,6 +129,12 @@ class ApiClient {
       (await _arr('POST', '/api/assistant/messages', body: {'text': text})).map(ChatMessage.fromJson).toList();
   Future<void> clearChat() async => _send('DELETE', '/api/assistant/messages');
 
+  // Money out through PayPal
+  Future<Me> setPayPalEmail(String email) async => Me.fromJson(await _obj('PUT', '/api/me/paypal', body: {'email': email}));
+  Future<Payout> withdraw(int amountPaise, {required String key}) async =>
+      Payout.fromJson(await _obj('POST', '/api/withdrawals', body: {'amount_paise': amountPaise}, key: key));
+  Future<MoneyView> money() async => MoneyView.fromJson(await _obj('GET', '/api/money'));
+
   // Requests between people
   Future<List<MoneyRequest>> moneyRequests() async => (await _arr('GET', '/api/money-requests')).map(MoneyRequest.fromJson).toList();
   Future<MoneyRequest> requestMoney(String payerId, int amountPaise, String note, {required String key}) async =>
@@ -172,8 +178,10 @@ class ApiClient {
       Budgets.fromJson(await _obj('PUT', '/api/trips/$tripId/budgets', body: paiseByCategory));
   Future<Insights> insights(String tripId) async => Insights.fromJson(await _obj('GET', '/api/trips/$tripId/insights'));
   Future<Settlement> settlement(String tripId) async => Settlement.fromJson(await _obj('GET', '/api/trips/$tripId/settlement'));
-  Future<Settlement> settle(String tripId, {required String key}) async =>
-      Settlement.fromJson(await _obj('POST', '/api/trips/$tripId/settle', key: key));
+  /// Closes the trip. With [payout], each person's part goes on to their
+  /// PayPal account (if they gave one).
+  Future<Settlement> settle(String tripId, {required String key, bool payout = false}) async =>
+      Settlement.fromJson(await _obj('POST', '/api/trips/$tripId/settle', body: {'payout': payout}, key: key));
 
   // Assistant and deposit requests
   Future<Plan> draftPlan(String tripId, String instruction) async =>

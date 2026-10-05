@@ -77,7 +77,7 @@ class _SpendingTabState extends State<SpendingTab> {
               ),
               const SectionTitle('Every expense'),
               if (newestFirst.isEmpty)
-                const EmptyState(icon: Icons.receipt_long_outlined, title: 'Nothing spent yet', body: 'Add an expense from the Wallet tab.'),
+                const EmptyState(icon: Icons.receipt_long_outlined, title: 'Nothing spent yet', body: 'Pay from the trip on the Overview tab.'),
               for (final e in newestFirst)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -86,7 +86,7 @@ class _SpendingTabState extends State<SpendingTab> {
                       leading: TileIcon(categoryIcon(e.category)),
                       title: Text(e.description, style: AppText.body(weight: FontWeight.w600)),
                       subtitle: Text(
-                        '${formatDateTime(e.at)}\n${e.mode == 'reimburse' ? 'Paid back to ${t.nameOf(e.payeeUserId)}' : 'Paid to ${e.payee}'}',
+                        '${formatDateTime(e.at)}\n${e.byPayPal ? 'By PayPal to ${e.payee}' : e.mode == 'reimburse' ? 'Paid back to ${t.nameOf(e.payeeUserId)}' : 'Paid to ${e.payee}'}',
                         style: AppText.detail(),
                       ),
                       isThreeLine: true,

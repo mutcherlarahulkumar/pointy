@@ -24,6 +24,8 @@ import '../money/request_flow.dart';
 import '../money/requests.dart';
 import '../money/split_flow.dart';
 import '../money/top_up.dart';
+import '../money/where_money.dart';
+import '../money/withdraw.dart';
 import '../pay/scan.dart';
 import '../profile/profile.dart';
 import 'alerts.dart';
@@ -206,9 +208,11 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
           PersonalCard(
             key: TourKeys.balance,
             balancePaise: me.personalBalancePaise,
-            caption: me.isMock ? 'Demo mode · PayPal is simulated' : 'Add money with PayPal sandbox',
+            caption: me.isMock ? 'Demo mode · PayPal is simulated' : 'Held in Pointy\'s PayPal business account',
+            onWhere: () => _go(const WhereMoneyScreen()),
             actions: [
               CardButton(key: TourKeys.addMoney, icon: Icons.add_rounded, label: 'Add money', primary: true, onTap: () => _go(const TopUpScreen())),
+              CardButton(icon: Icons.output_rounded, label: 'Withdraw', onTap: () => _go(const WithdrawScreen())),
               CardButton(key: TourKeys.myQr, icon: Icons.qr_code_2_rounded, label: 'My QR', onTap: () => _go(const MyQrScreen())),
             ],
           ),

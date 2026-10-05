@@ -41,8 +41,9 @@ void main() {
     for (final label in ['Add money', 'My QR', 'Pay', 'Request', 'Split bill']) {
       expect(find.text(label), findsWidgets);
     }
-    expect(find.text('Dev'), findsOneWidget); // recent people
     expect(find.text('7'), findsOneWidget); // unread alerts badge
+    await tester.scrollUntilVisible(find.text('Dev'), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('Dev'), findsOneWidget); // recent people
     // Home stops its refresh timer when it goes away.
     await tester.pumpWidget(const SizedBox());
   });

@@ -133,9 +133,11 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
     final notEnough = !_paypal && paise != null && balance != null && paise > balance;
     return FlowScaffold(
       appBarTitle: 'Add money',
-      title: _forTrip ? 'Add to ${widget.trip!.name}' : 'Add money',
+      title: _forTrip ? 'Put money into ${widget.trip!.name}' : 'Add money',
       hint: 'Pick an amount, then choose how to pay.',
-      subtitle: _forTrip ? 'It goes into your share of the trip wallet.' : 'Pay with PayPal; it lands in your Pointy balance.',
+      subtitle: _forTrip
+          ? 'It becomes your share of the trip wallet, held in Pointy\'s PayPal business account.'
+          : 'Pay with PayPal. The money goes into Pointy\'s PayPal business account and shows as your balance.',
       buttonLabel: notEnough ? 'Not enough balance' : (_paypal ? 'Continue to PayPal' : 'Add ${paise == null ? '' : formatPaise(paise)}'),
       busy: _busy,
       onNext: paise == null || notEnough ? null : () => _start(paise),

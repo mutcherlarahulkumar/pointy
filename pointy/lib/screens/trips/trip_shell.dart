@@ -16,7 +16,7 @@ class TripShell extends StatefulWidget {
 
   final String tripId;
 
-  /// 0 Wallet, 1 Deposits, 2 Spending, 3 Budget.
+  /// 0 Overview, 1 Money in, 2 Spent, 3 Budget.
   final int initialTab;
 
   @override
@@ -46,7 +46,7 @@ class _TripShellState extends State<TripShell> {
             return Column(
               children: [
                 _Header(trip: trip),
-                const TabBar(tabs: [Tab(text: 'Wallet'), Tab(text: 'Deposits'), Tab(text: 'Spending'), Tab(text: 'Budget')]),
+                const TabBar(tabs: [Tab(text: 'Overview'), Tab(text: 'Money in'), Tab(text: 'Spent'), Tab(text: 'Budget')]),
                 Expanded(
                   child: TabBarView(
                     children: [
