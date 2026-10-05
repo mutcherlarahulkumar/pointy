@@ -56,6 +56,7 @@ type Service struct {
 	plans         map[string]*domain.Plan
 	alerts        []*domain.Alert
 	moneyRequests []*domain.MoneyRequest
+	chats         map[string][]*domain.ChatMessage // user id -> conversation with the AI
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
@@ -80,7 +81,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{},
+		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{},
 	}
 }
 

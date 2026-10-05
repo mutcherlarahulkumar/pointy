@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'screens/ai/insights.dart';
+import 'screens/ai/pointy_ai.dart';
 import 'screens/auth/welcome.dart';
 import 'screens/history/history.dart';
 import 'screens/home/home.dart';
@@ -97,19 +98,27 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: FadeTransition(
-          opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
-          child: IndexedStack(
-            index: _index,
-            children: [
-              for (var i = 0; i < 4; i++)
-                TabScope(
-                  index: i,
-                  // Off-screen tabs do not tick animations or timers' UI.
-                  child: TickerMode(enabled: i == _index, child: _built.contains(i) ? _tab(i) : const SizedBox.shrink()),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: FadeTransition(
+                opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
+                child: IndexedStack(
+                  index: _index,
+                  children: [
+                    for (var i = 0; i < 4; i++)
+                      TabScope(
+                        index: i,
+                        // Off-screen tabs do not tick animations or timers' UI.
+                        child: TickerMode(enabled: i == _index, child: _built.contains(i) ? _tab(i) : const SizedBox.shrink()),
+                      ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+            ),
+            // Pointy AI is one tap away on every tab.
+            Positioned(right: 16, bottom: 16, child: PointyAiButton(key: TourKeys.ai)),
+          ],
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,

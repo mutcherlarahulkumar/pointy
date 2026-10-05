@@ -136,6 +136,22 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 	authed("GET /api/users/lookup", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return svc.LookupPhone(r.URL.Query().Get("phone"))
 	})
+	// ---- Pointy AI: a conversation about your own money, saved in the database
+	authed("GET /api/assistant/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return svc.ChatHistory(userID(r)), nil
+	})
+	authed("POST /api/assistant/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		return svc.Chat(r.Context(), userID(r), in.Text)
+	})
+	authed("DELETE /api/assistant/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]bool{"ok": true}, svc.ClearChat(userID(r))
+	})
 	authed("POST /api/quick-pay", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in struct {
 			Text string `json:"text"`

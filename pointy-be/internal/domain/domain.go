@@ -228,3 +228,30 @@ type Alert struct {
 	Body   string    `json:"body"`
 	At     time.Time `json:"at"`
 }
+
+// ChatMessage is one line of a person's conversation with the Pointy AI
+// assistant. The assistant may suggest an action, but the app only opens a
+// screen with it filled in: it never moves money.
+type ChatMessage struct {
+	ID     string      `json:"id"`
+	UserID string      `json:"-"`
+	Role   string      `json:"role"` // user or assistant
+	Text   string      `json:"text"`
+	Action *ChatAction `json:"action,omitempty"`
+	Source string      `json:"source,omitempty"` // ai or rules, on assistant lines
+	At     time.Time   `json:"at"`
+}
+
+// ChatAction is a button under an assistant reply.
+type ChatAction struct {
+	Type   string      `json:"type"` // pay, request, open
+	Label  string      `json:"label"`
+	Person *PublicUser `json:"person,omitempty"`
+	Amount Paise       `json:"amount_paise,omitempty"`
+	Note   string      `json:"note,omitempty"`
+	Screen string      `json:"screen,omitempty"` // add_money, requests, trips, history, insights, split, trip
+	TripID string      `json:"trip_id,omitempty"`
+}
+
+// ChatCleared deletes a person's conversation.
+type ChatCleared struct{ UserID string }

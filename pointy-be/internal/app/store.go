@@ -35,6 +35,7 @@ type Snapshot struct {
 	Plans         []*domain.Plan
 	Alerts        []*domain.Alert
 	MoneyRequests []*domain.MoneyRequest
+	Chats         []*domain.ChatMessage
 }
 
 // MemoryStore keeps nothing: state lives only as long as the process. Tests
@@ -113,6 +114,10 @@ func (s *Service) loadL(ctx context.Context) error {
 	}
 	s.alerts = snap.Alerts
 	s.moneyRequests = snap.MoneyRequests
+	s.chats = map[string][]*domain.ChatMessage{}
+	for _, m := range snap.Chats {
+		s.chats[m.UserID] = append(s.chats[m.UserID], m)
+	}
 	s.pending = nil
 	return nil
 }
