@@ -21,7 +21,10 @@ import '../trips/trip_shell.dart';
 /// say a payment ("pay Dev 200 for chai"). Answers come from your account;
 /// a payment only opens the usual confirm screen, filled in.
 class PointyAiScreen extends StatefulWidget {
-  const PointyAiScreen({super.key});
+  const PointyAiScreen({super.key, this.draft = ''});
+
+  /// Text to start the message with, for example "Find " to go shopping.
+  final String draft;
 
   @override
   State<PointyAiScreen> createState() => _PointyAiScreenState();
@@ -38,7 +41,7 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
     'Add money',
   ];
 
-  final _text = TextEditingController();
+  late final _text = TextEditingController(text: widget.draft);
   final _scroll = ScrollController();
   List<ChatMessage>? _messages;
   String? _loadError;
