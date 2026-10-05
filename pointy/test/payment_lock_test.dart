@@ -5,25 +5,32 @@ import 'package:pointy/api.dart';
 import 'package:pointy/models.dart';
 import 'package:pointy/payment_lock.dart';
 import 'package:pointy/screens/money/pay_flow.dart';
+import 'package:pointy/screens/profile/payment_check.dart';
 import 'package:pointy/theme.dart';
 
 import 'fakes.dart';
 
-/// A lock that answers without the phone: [device] is what the fingerprint
-/// prompt returns (null: the phone has no lock, so the PIN is asked).
+/// A lock that answers without the phone. [mode] is the chosen check and
+/// [scan] what the fingerprint prompt returns.
 class FakeLock extends PaymentLock {
-  FakeLock({this.on = true, this.device});
-  final bool on;
-  final bool? device;
+  FakeLock({this.check = PayCheck.pin, this.scan = false});
+  PayCheck check;
+  final bool scan;
   final asked = <String>[];
 
   @override
-  Future<bool> isOn() async => on;
+  Future<PayCheck> mode() async => check;
 
   @override
-  Future<bool?> deviceCheck(String reason) async {
+  Future<void> setMode(PayCheck m) async => check = m;
+
+  @override
+  Future<bool> canUseBiometrics() async => true;
+
+  @override
+  Future<bool> biometricCheck(String reason) async {
     asked.add(reason);
-    return device;
+    return scan;
   }
 }
 
@@ -57,57 +64,74 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('a fingerprint that is accepted pays', (tester) async {
-    final lock = FakeLock(device: true);
+  Future<void> typePin(WidgetTester tester, String pin) async {
+    for (final d in pin.split('')) {
+      await tester.tap(find.text(d).last);
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('by default every payment asks for the Pointy PIN, not the fingerprint', (tester) async {
+    final lock = FakeLock();
     PaymentLock.instance = lock;
     await openReview(tester);
-    expect(lock.asked, ['Pay ₹200 to Dev Mehta']);
-    expect(paid(), isTrue);
-    expect(find.text('Paid'), findsOneWidget);
-  });
-
-  testWidgets('cancelling the fingerprint does not pay', (tester) async {
-    PaymentLock.instance = FakeLock(device: false);
-    await openReview(tester);
+    expect(lock.asked, isEmpty);
+    expect(find.text('Enter your PIN'), findsOneWidget);
     expect(paid(), isFalse);
-    expect(find.text('Pay ₹200'), findsOneWidget);
+    await typePin(tester, '246810');
+    final pin = sent.firstWhere((r) => r.url.path == '/api/auth/verify-pin');
+    expect(pin.body, '{"pin":"246810"}');
+    expect(paid(), isTrue);
   });
 
-  testWidgets('with no screen lock the Pointy PIN is asked, and a wrong one is refused', (tester) async {
+  testWidgets('a wrong PIN is refused and nothing is paid', (tester) async {
     PaymentLock.instance = FakeLock();
     api = fakeApi(log: sent, overrides: {
       'POST /api/payments/personal': (201, _paid),
       'POST /api/auth/verify-pin': (401, '{"error":{"code":"wrong_pin","message":"wrong PIN","details":{"attempts_left":4}}}'),
     });
     await openReview(tester);
-    expect(find.text('Enter your PIN'), findsOneWidget);
-    for (final d in '135790'.split('')) {
-      await tester.tap(find.text(d).last);
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
+    await typePin(tester, '135790');
     expect(find.text('Wrong PIN. 4 tries left.'), findsOneWidget);
     expect(paid(), isFalse);
   });
 
-  testWidgets('the right PIN pays', (tester) async {
-    PaymentLock.instance = FakeLock();
+  testWidgets('with fingerprint chosen, a good scan pays without the PIN', (tester) async {
+    final lock = FakeLock(check: PayCheck.biometric, scan: true);
+    PaymentLock.instance = lock;
     await openReview(tester);
-    for (final d in '246810'.split('')) {
-      await tester.tap(find.text(d).last);
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
-    final pin = sent.firstWhere((r) => r.url.path == '/api/auth/verify-pin');
-    expect(pin.body, '{"pin":"246810"}');
+    expect(lock.asked, ['Pay ₹200 to Dev Mehta']);
+    expect(find.text('Enter your PIN'), findsNothing);
+    expect(paid(), isTrue);
+    expect(find.text('Paid'), findsOneWidget);
+  });
+
+  testWidgets('with fingerprint chosen, a failed scan falls back to the PIN', (tester) async {
+    final lock = FakeLock(check: PayCheck.biometric, scan: false);
+    PaymentLock.instance = lock;
+    await openReview(tester);
+    expect(lock.asked, hasLength(1));
+    expect(find.text('Enter your PIN'), findsOneWidget);
+    expect(paid(), isFalse);
+    await typePin(tester, '246810');
     expect(paid(), isTrue);
   });
 
-  testWidgets('turned off, nothing is asked', (tester) async {
-    final lock = FakeLock(on: false);
+  testWidgets('switching to fingerprint needs the PIN and one good scan', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.7;
+    addTearDown(tester.view.reset);
+    final lock = FakeLock(scan: true);
     PaymentLock.instance = lock;
-    await openReview(tester);
-    expect(lock.asked, isEmpty);
-    expect(paid(), isTrue);
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const PaymentCheckScreen()));
+    await tester.pumpAndSettle();
+    expect(find.text('Default'), findsOneWidget);
+    await tester.tap(find.text('Fingerprint or face'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter your PIN'), findsOneWidget);
+    await typePin(tester, '246810');
+    expect(lock.check, PayCheck.biometric);
+    expect(lock.asked, ['Scan to turn on fingerprint for payments']);
   });
 }
