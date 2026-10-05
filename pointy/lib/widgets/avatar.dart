@@ -11,7 +11,7 @@ class Avatar extends StatelessWidget {
   final String name;
   final double size;
 
-  static const _palette = [
+  static List<(Color, Color)> get _palette => [
     (AppColors.pine100, AppColors.pine700),
     (AppColors.personalBg, AppColors.personal),
     (AppColors.amber100, AppColors.amber900),

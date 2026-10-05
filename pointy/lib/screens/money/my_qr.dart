@@ -49,8 +49,8 @@ class _MyQrScreenState extends State<MyQrScreen> {
                   QrImageView(
                     data: qrPayload(me.user),
                     size: 220,
-                    eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.circle, color: AppColors.pine900),
-                    dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.circle, color: AppColors.pine900),
+                    eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.circle, color: AppColors.pine900),
+                    dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.circle, color: AppColors.pine900),
                   ),
                   const SizedBox(height: 12),
                   Text('Scan with Pointy to pay me', style: AppText.detail(weight: FontWeight.w600)),

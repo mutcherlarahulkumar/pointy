@@ -97,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
       decoration: BoxDecoration(color: AppColors.pine100, borderRadius: BorderRadius.circular(16)),
       child: Row(
         children: [
-          const Icon(Icons.explore_rounded, color: AppColors.pine700, size: 28),
+          Icon(Icons.explore_rounded, color: AppColors.pine700, size: 28),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -118,7 +118,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
           ),
           IconButton(
             tooltip: 'Not now',
-            icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.pine700),
+            icon: Icon(Icons.close_rounded, size: 20, color: AppColors.pine700),
             onPressed: () {
               setState(() => _offerTour = false);
               TourPrefs.markSeen();

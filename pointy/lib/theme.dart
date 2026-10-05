@@ -3,10 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// The colour tokens from the design. Use these names, never raw hex values.
 class AppColors {
-  static const pine900 = Color(0xFF0A3D30);
-  static const pine700 = Color(0xFF0F5A47);
-  static const pine500 = Color(0xFF2E8268);
-  static const pine100 = Color(0xFFDCEBE4);
+  /// The primary family ("pine" in the design). The person picks it in
+  /// Profile → App colour; the app rebuilds when it changes.
+  static AppPalette palette = AppPalette.green;
+
+  static Color get pine900 => palette.c900;
+  static Color get pine700 => palette.c700;
+  static Color get pine500 => palette.c500;
+  static Color get pine100 => palette.c100;
   static const amber500 = Color(0xFFF2B33D);
   static const amber100 = Color(0xFFFFF1CC);
   static const amber900 = Color(0xFF3D2A00);
@@ -24,6 +28,22 @@ class AppColors {
   static const error = Color(0xFFB3261E);
   static const errorBg = Color(0xFFFBE4E1);
   static const personalDark = Color(0xFF22306A);
+}
+
+/// A primary colour family: dark (pressed, tags), main (buttons, the trip
+/// card), mid (charts, icons) and light (selected, tiles).
+class AppPalette {
+  const AppPalette(this.id, this.name, this.c900, this.c700, this.c500, this.c100);
+
+  final String id;
+  final String name;
+  final Color c900, c700, c500, c100;
+
+  static const green = AppPalette('green', 'Pine green', Color(0xFF0A3D30), Color(0xFF0F5A47), Color(0xFF2E8268), Color(0xFFDCEBE4));
+  static const blue = AppPalette('blue', 'Ocean blue', Color(0xFF0B3460), Color(0xFF1659A3), Color(0xFF3B82C4), Color(0xFFDDEAF7));
+  static const all = [green, blue];
+
+  static AppPalette byId(String? id) => all.firstWhere((p) => p.id == id, orElse: () => green);
 }
 
 /// Endless decorative animations (the AI glow). Tests turn them off so they
@@ -124,7 +144,7 @@ ThemeData buildTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.pine700, width: 2),
+        borderSide: BorderSide(color: AppColors.pine700, width: 2),
       ),
     ),
     // Pages slide and fade in the same way everywhere.
@@ -137,7 +157,7 @@ ThemeData buildTheme() {
       selectedColor: AppColors.pine100,
       side: const BorderSide(color: AppColors.line),
     ),
-    tabBarTheme: const TabBarThemeData(
+    tabBarTheme: TabBarThemeData(
       labelColor: AppColors.pine700,
       unselectedLabelColor: AppColors.slate,
       indicatorColor: AppColors.pine700,

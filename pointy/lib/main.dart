@@ -9,6 +9,7 @@ import 'screens/history/history.dart';
 import 'screens/home/home.dart';
 import 'screens/pay/scan.dart';
 import 'screens/trips/trips.dart';
+import 'look.dart';
 import 'session.dart';
 import 'tabs.dart';
 import 'tour.dart';
@@ -20,6 +21,7 @@ Future<void> main() async {
   // changes font after a download and works offline.
   GoogleFonts.config.allowRuntimeFetching = false;
   await Session.restore();
+  await AppLook.restore();
   runApp(const PointyApp());
 }
 
@@ -28,15 +30,20 @@ class PointyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Pointy',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      navigatorKey: Session.navigatorKey,
-      // Signed in: the app. Signed out: the welcome screen.
-      home: ValueListenableBuilder<bool>(
-        valueListenable: Session.signedIn,
-        builder: (context, signedIn, _) => signedIn ? const MainShell() : const WelcomeScreen(),
+    // A new colour rebuilds the whole app in it (and starts at Home).
+    return ValueListenableBuilder<AppPalette>(
+      valueListenable: AppLook.palette,
+      builder: (context, palette, _) => MaterialApp(
+        key: ValueKey(palette.id),
+        title: 'Pointy',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        navigatorKey: Session.navigatorKey,
+        // Signed in: the app. Signed out: the welcome screen.
+        home: ValueListenableBuilder<bool>(
+          valueListenable: Session.signedIn,
+          builder: (context, signedIn, _) => signedIn ? const MainShell() : const WelcomeScreen(),
+        ),
       ),
     );
   }
