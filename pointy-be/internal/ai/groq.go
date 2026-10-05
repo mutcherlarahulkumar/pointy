@@ -240,6 +240,8 @@ const receiptSystem = `You read photos of bills and receipts for Pointy, an Indi
 - date: the bill date as YYYY-MM-DD, or "" if not printed.
 - category: one of food (restaurants, cafes, groceries, drinks), stay (hotels, homestays), transport (cabs, fuel, tickets, rentals, tolls) or other.
 - description: two to five words for the expense list, for example "Dinner at Britto's".
+- items: every ordered line in printed order: name as printed (short), quantity (1 if not shown) and amount = that line's total price as plain digits. Do not include subtotals, taxes or charges here.
+- charges: taxes (CGST, SGST, VAT), service charge, packing, tip and discounts, each with its amount as plain digits; a discount is negative ("-50"). The items plus the charges should add up to the total.
 Never guess numbers you cannot read. Answer with JSON only.`
 
 // ReadReceipt reads a photo of a bill with the vision model.
@@ -258,7 +260,13 @@ func (g *Groq) ReadReceipt(ctx context.Context, image []byte, mediaType string) 
 			"date":        str,
 			"category":    map[string]any{"type": "string", "enum": []string{"food", "stay", "transport", "other"}},
 			"description": str,
-		}, "is_receipt", "merchant", "total", "currency", "date", "category", "description"), &out)
+			"items": map[string]any{"type": "array", "items": obj(map[string]any{
+				"name": str, "quantity": map[string]any{"type": "integer"}, "amount": str,
+			}, "name", "quantity", "amount")},
+			"charges": map[string]any{"type": "array", "items": obj(map[string]any{
+				"name": str, "quantity": map[string]any{"type": "integer"}, "amount": str,
+			}, "name", "quantity", "amount")},
+		}, "is_receipt", "merchant", "total", "currency", "date", "category", "description", "items", "charges"), &out)
 	return out, err
 }
 

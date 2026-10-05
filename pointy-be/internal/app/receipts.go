@@ -25,6 +25,47 @@ type ScannedReceipt struct {
 	Description string          `json:"description"`
 	Date        string          `json:"date,omitempty"`
 	Currency    string          `json:"currency"`
+	// The bill's lines and its charges, for splitting by who had what.
+	// ItemsMatch says the lines and charges add up to the total (within
+	// ₹2); when they do not, the app asks the person to check them.
+	Items      []ScannedLine `json:"items"`
+	Charges    []ScannedLine `json:"charges"`
+	ItemsMatch bool          `json:"items_match"`
+}
+
+// ScannedLine is one line of a scanned bill, in paise.
+type ScannedLine struct {
+	Name     string `json:"name"`
+	Quantity int    `json:"quantity"`
+	Amount   Paise  `json:"amount_paise"`
+}
+
+// scannedLines converts the model's lines, dropping any it could not read.
+func scannedLines(in []ai.ReceiptLine, allowNegative bool) (out []ScannedLine, sum Paise) {
+	out = []ScannedLine{}
+	for _, l := range in {
+		raw := strings.TrimSpace(l.Amount)
+		neg := strings.HasPrefix(raw, "-")
+		v, ok := ai.ParseRupees(strings.TrimPrefix(raw, "-"))
+		name := strings.TrimSpace(l.Name)
+		if !ok || v <= 0 || name == "" || (neg && !allowNegative) {
+			continue
+		}
+		p := Paise(v)
+		if neg {
+			p = -p
+		}
+		q := l.Quantity
+		if q <= 0 {
+			q = 1
+		}
+		if len([]rune(name)) > 40 {
+			name = string([]rune(name)[:40])
+		}
+		out = append(out, ScannedLine{Name: name, Quantity: q, Amount: p})
+		sum += p
+	}
+	return out, sum
 }
 
 var receiptTypes = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true, "image/gif": true}
@@ -76,5 +117,10 @@ func (s *Service) ScanReceipt(ctx context.Context, image []byte) (ScannedReceipt
 	if out.Description == "" {
 		out.Description = firstNonEmpty(out.Merchant, "Receipt")
 	}
+	var items, charges Paise
+	out.Items, items = scannedLines(r.Items, false)
+	out.Charges, charges = scannedLines(r.Charges, true)
+	diff := items + charges - out.Amount
+	out.ItemsMatch = len(out.Items) > 0 && diff >= -200 && diff <= 200
 	return out, nil
 }

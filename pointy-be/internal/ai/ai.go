@@ -123,6 +123,18 @@ type Receipt struct {
 	Date        string `json:"date"`     // "2026-10-12" or ""
 	Category    string `json:"category"` // food, stay, transport, other
 	Description string `json:"description"`
+	// Items are the bill's lines (what was ordered); Charges are taxes,
+	// service charge, tips and discounts (a discount is negative). Used to
+	// split a bill by who had what.
+	Items   []ReceiptLine `json:"items"`
+	Charges []ReceiptLine `json:"charges"`
+}
+
+// ReceiptLine is one printed line of a bill.
+type ReceiptLine struct {
+	Name     string `json:"name"`
+	Quantity int    `json:"quantity"`
+	Amount   string `json:"amount"` // the line's total, "360.00"; "-50" for a discount
 }
 
 // Line is one row of a breakdown, already formatted for the model.

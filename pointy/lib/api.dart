@@ -159,6 +159,12 @@ class ApiClient {
   Future<void> markAlertsSeen() async => _send('POST', '/api/alerts/seen');
 
   /// Reads a photo of a bill (JPEG or PNG bytes) into expense fields.
+  /// Splits a bill by who had what. [items] are {name, amount_paise, people}.
+  Future<List<ItemSplitPart>> splitByItems(String description, List<Map<String, dynamic>> items, int extraPaise, {required String key}) async {
+    final r = await _obj('POST', '/api/splits/items', body: {'description': description, 'items': items, 'extra_paise': extraPaise}, key: key);
+    return [for (final p in (r['parts'] as List? ?? const [])) ItemSplitPart.fromJson(p as Map<String, dynamic>)];
+  }
+
   Future<ScannedReceipt> scanReceipt(List<int> imageBytes) async =>
       ScannedReceipt.fromJson(await _obj('POST', '/api/receipts/scan', body: {'image_base64': base64Encode(imageBytes)}));
 

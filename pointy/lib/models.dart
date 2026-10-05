@@ -660,7 +660,18 @@ class ScannedReceipt {
   final String category;
   final String description;
   final String date;
-  ScannedReceipt({required this.amountPaise, required this.merchant, required this.category, required this.description, required this.date});
+  final List<BillLine> items; // what was ordered
+  final List<BillLine> charges; // taxes, service, tip; a discount is negative
+  final bool itemsMatch; // items and charges add up to the total
+  ScannedReceipt(
+      {required this.amountPaise,
+      required this.merchant,
+      required this.category,
+      required this.description,
+      required this.date,
+      this.items = const [],
+      this.charges = const [],
+      this.itemsMatch = false});
 
   factory ScannedReceipt.fromJson(Map<String, dynamic> j) => ScannedReceipt(
         amountPaise: _int(j['amount_paise']),
@@ -668,6 +679,38 @@ class ScannedReceipt {
         category: _str(j['category']),
         description: _str(j['description']),
         date: _str(j['date']),
+        items: _list(j['items'], BillLine.fromJson),
+        charges: _list(j['charges'], BillLine.fromJson),
+        itemsMatch: j['items_match'] == true,
+      );
+}
+
+/// One line of a bill.
+class BillLine {
+  final String name;
+  final int quantity;
+  final int amountPaise;
+  BillLine({required this.name, this.quantity = 1, required this.amountPaise});
+
+  factory BillLine.fromJson(Map<String, dynamic> j) =>
+      BillLine(name: _str(j['name']), quantity: _int(j['quantity']), amountPaise: _int(j['amount_paise']));
+}
+
+/// One person's part of a bill split by items.
+class ItemSplitPart {
+  final Person user;
+  final List<String> items;
+  final int subtotalPaise;
+  final int extraPaise;
+  final int totalPaise;
+  ItemSplitPart({required this.user, required this.items, required this.subtotalPaise, required this.extraPaise, required this.totalPaise});
+
+  factory ItemSplitPart.fromJson(Map<String, dynamic> j) => ItemSplitPart(
+        user: Person.fromJson(_map(j['user'])),
+        items: [for (final i in (j['items'] as List? ?? const [])) '$i'],
+        subtotalPaise: _int(j['subtotal_paise']),
+        extraPaise: _int(j['extra_paise']),
+        totalPaise: _int(j['total_paise']),
       );
 }
 

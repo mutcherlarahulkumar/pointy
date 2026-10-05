@@ -11,6 +11,7 @@ import '../../widgets/flow_scaffold.dart';
 import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/success.dart';
+import 'bill_split.dart';
 
 const _steps = ['Bill', 'People', 'Split'];
 
@@ -61,6 +62,12 @@ class _SplitBillScreenState extends State<SplitBillScreen> {
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(labelText: 'What was it?', hintText: 'Dinner at Toit', counterText: ''),
           onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BillSplitScreen())),
+          icon: const Icon(Icons.receipt_long_rounded, size: 18),
+          label: const Text('Split by items instead (scan the bill)'),
         ),
       ],
     );

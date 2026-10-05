@@ -269,3 +269,152 @@ func (s *Service) SplitBill(userID string, in SplitBillInput) (SplitBillResult, 
 	}
 	return out, nil
 }
+
+// ItemSplitInput is a bill split by who had what.
+type ItemSplitInput struct {
+	Description string          `json:"description"`
+	Items       []ItemShareLine `json:"items"`
+	// Extra is everything on the bill that is not an item: taxes, service
+	// charge and tip (or a discount, negative). It is shared in proportion
+	// to what each person had.
+	Extra Paise `json:"extra_paise"`
+}
+
+// ItemShareLine is one item and who had it (shared equally between them).
+type ItemShareLine struct {
+	Name   string   `json:"name"`
+	Amount Paise    `json:"amount_paise"`
+	People []string `json:"people"`
+}
+
+// ItemSplitPart is one person's part: their items and their share of the
+// extras.
+type ItemSplitPart struct {
+	User     domain.PublicUser `json:"user"`
+	Items    []string          `json:"items"`
+	Subtotal Paise             `json:"subtotal_paise"`
+	Extra    Paise             `json:"extra_paise"`
+	Total    Paise             `json:"total_paise"`
+}
+
+// ItemSplitResult is the parts and the requests sent.
+type ItemSplitResult struct {
+	Total    Paise              `json:"total_paise"`
+	Parts    []ItemSplitPart    `json:"parts"`
+	Requests []MoneyRequestView `json:"requests"`
+}
+
+// SplitByItems shares a bill by who had what: each item is split equally
+// between the people who had it, and the extras in proportion to each
+// person's items. Everything is whole paise and adds up exactly to the
+// bill. Everyone but the person who paid gets a request listing their
+// items.
+func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in.Description = strings.TrimSpace(in.Description)
+	if in.Description == "" {
+		in.Description = "the bill"
+	}
+	if len(in.Items) == 0 || len(in.Items) > 100 {
+		return ItemSplitResult{}, domain.Invalid("add the items on the bill")
+	}
+	var order []string // people in the order they first appear
+	sub := map[string]Paise{}
+	items := map[string][]string{}
+	var subtotal Paise
+	for _, it := range in.Items {
+		name := strings.TrimSpace(it.Name)
+		if name == "" || it.Amount <= 0 {
+			return ItemSplitResult{}, domain.Invalid("every item needs a name and a price")
+		}
+		if len(it.People) == 0 {
+			return ItemSplitResult{}, domain.Invalid("choose who had %s", name)
+		}
+		parts := make([]domain.SplitInput, 0, len(it.People))
+		for _, p := range it.People {
+			if _, ok := s.users[p]; !ok {
+				return ItemSplitResult{}, domain.Invalid("unknown person %q", p)
+			}
+			parts = append(parts, domain.SplitInput{UserID: p, Weight: 1})
+		}
+		shares, err := domain.Split(it.Amount, domain.SplitEqual, parts)
+		if err != nil {
+			return ItemSplitResult{}, err
+		}
+		for _, sh := range shares {
+			if _, seen := sub[sh.UserID]; !seen {
+				order = append(order, sh.UserID)
+			}
+			sub[sh.UserID] += sh.Amount
+			label := name
+			if len(it.People) > 1 {
+				label += " (shared)"
+			}
+			items[sh.UserID] = append(items[sh.UserID], label)
+		}
+		subtotal += it.Amount
+	}
+	total := subtotal + in.Extra
+	if in.Extra < -subtotal || total <= 0 {
+		return ItemSplitResult{}, domain.Invalid("the discount is bigger than the bill")
+	}
+	if err := checkAmount(total); err != nil {
+		return ItemSplitResult{}, err
+	}
+	// The extras, shared by each person's subtotal.
+	extra := map[string]Paise{}
+	if in.Extra != 0 {
+		ws := make([]domain.SplitInput, 0, len(order))
+		for _, u := range order {
+			if sub[u] > 0 { // a share of a few paise can round to nothing
+				ws = append(ws, domain.SplitInput{UserID: u, Weight: int64(sub[u])})
+			}
+		}
+		abs := in.Extra
+		if abs < 0 {
+			abs = -abs
+		}
+		shares, err := domain.Split(abs, domain.SplitShares, ws)
+		if err != nil {
+			return ItemSplitResult{}, err
+		}
+		for _, sh := range shares {
+			if in.Extra < 0 {
+				extra[sh.UserID] = -sh.Amount
+			} else {
+				extra[sh.UserID] = sh.Amount
+			}
+		}
+	}
+	out := ItemSplitResult{Total: total, Parts: []ItemSplitPart{}, Requests: []MoneyRequestView{}}
+	for _, u := range order {
+		part := ItemSplitPart{User: s.users[u].Public(), Items: items[u], Subtotal: sub[u], Extra: extra[u], Total: sub[u] + extra[u]}
+		out.Parts = append(out.Parts, part)
+		if u == userID || part.Total <= 0 {
+			continue
+		}
+		r, err := s.requestMoneyL(userID, MoneyRequestInput{PayerID: u, Amount: part.Total, Note: itemNote(in.Description, part.Items)})
+		if err != nil {
+			s.pending = nil
+			return ItemSplitResult{}, err
+		}
+		out.Requests = append(out.Requests, s.mrViewL(r, userID))
+	}
+	if len(out.Requests) == 0 {
+		return ItemSplitResult{}, domain.Invalid("give at least one item to someone else")
+	}
+	if err := s.commitL(); err != nil {
+		return ItemSplitResult{}, err
+	}
+	return out, nil
+}
+
+// itemNote is "Dinner: Paneer tikka, Lime soda" cut to fit a request note.
+func itemNote(desc string, items []string) string {
+	note := desc + ": " + strings.Join(items, ", ")
+	if r := []rune(note); len(r) > 80 {
+		note = strings.TrimSpace(string(r[:79])) + "…"
+	}
+	return note
+}
