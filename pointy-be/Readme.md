@@ -25,13 +25,32 @@ Settings are in `.env.example`.
 
 ```
 cmd/server        entry point: PayPal client, Postgres store, HTTP server
+cmd/migrate       moves the schema up or down, shows what is applied
 cmd/paypalcheck   proves the sandbox keys work: create an order, approve it, capture it
 internal/domain   money, split, ledger, budget maths. No I/O
 internal/paypal   checkout client: interface, Mock, Sandbox
 internal/app      use cases; keeps a working copy in memory and saves every change
-internal/store    Postgres: schema created on start, each change saved in one transaction
+internal/store    Postgres: versioned migrations, each change saved in one transaction
 internal/httpapi  routes, bearer-token auth, JSON, idempotency, PayPal return page
 ```
+
+## Database migrations
+
+The schema lives in `internal/store/migrations/` as numbered pairs, `0001_init.up.sql` and `0001_init.down.sql`, built into the binary. Applied versions are recorded in the `schema_migrations` table.
+
+```bash
+go run ./cmd/migrate status     # applied and pending versions
+go run ./cmd/migrate up         # apply everything pending
+go run ./cmd/migrate up 1       # apply only the next one
+go run ./cmd/migrate down       # undo the last one
+go run ./cmd/migrate down 2     # undo the last two
+```
+
+It reads `DATABASE_URL` from the environment or `.env`. The server runs `up` on start, so a deploy on Render applies new migrations by itself. A Postgres advisory lock stops two processes from migrating at once, and each migration runs in one transaction with its `schema_migrations` row, so a failure leaves the last fully applied version.
+
+To change the schema, add the next number with both an `up` and a `down` file. Never edit a migration that has already run anywhere. `down` on `0001` drops every table, and with them all the data.
+
+A database created before migrations existed (tables, but no `schema_migrations`) is adopted on the first start: `0001` only creates what is missing.
 
 The service runs as **one instance per database** (its in-memory copy is not shared).
 
