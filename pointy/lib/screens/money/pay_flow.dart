@@ -28,6 +28,7 @@ class PayPersonScreen extends StatelessWidget {
       steps: _steps,
       step: 0,
       title: 'Who are you paying?',
+      hint: 'Pick a friend, type their mobile number, or scan their QR.',
       buttonLabel: 'Choose someone above',
       onNext: null,
       children: [
@@ -71,6 +72,7 @@ class _PayAmountScreenState extends State<PayAmountScreen> {
       steps: _steps,
       step: 1,
       title: 'How much?',
+      hint: 'Type the amount. A short note tells them what it is for.',
       buttonLabel: 'Continue',
       onNext: paise == null
           ? null
@@ -156,6 +158,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
           steps: _steps,
           step: 2,
           title: 'Check and pay',
+          hint: 'Check the details. You confirm with your fingerprint or PIN.',
           buttonLabel: short ? 'Add money first' : 'Pay ${formatPaise(widget.amountPaise)}',
           busy: _busy,
           onNext: short
@@ -164,13 +167,15 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
                   setState(() => _me = api.me());
                 }
               : _pay,
-          footer: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.fingerprint_rounded, size: 14, color: AppColors.slate),
-              const SizedBox(width: 4),
-              Flexible(child: Text('Instant, from your balance. You confirm with your fingerprint or PIN.', textAlign: TextAlign.center, style: AppText.small())),
-            ],
+          footer: Text.rich(
+            TextSpan(children: [
+              const WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.fingerprint_rounded, size: 14, color: AppColors.slate)),
+              ),
+              TextSpan(text: 'Instant, from your balance. You confirm with your fingerprint or PIN.', style: AppText.small()),
+            ]),
+            textAlign: TextAlign.center,
           ),
           children: [
             SurfaceCard(

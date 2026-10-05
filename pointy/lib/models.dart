@@ -654,3 +654,28 @@ class ScannedReceipt {
         date: _str(j['date']),
       );
 }
+
+/// A typed sentence ("pay Asha 200 for coffee") read into a payment or a
+/// request. Nothing is paid until the person confirms on the usual screen.
+class QuickPayRead {
+  final String action; // pay or request
+  final Person? person;
+  final List<Person> choices; // when a name fits more than one person
+  final int amountPaise;
+  final String note;
+  final String reply;
+  final String source; // ai or rules
+  QuickPayRead({required this.action, this.person, this.choices = const [], required this.amountPaise, required this.note, required this.reply, required this.source});
+
+  bool get isRequest => action == 'request';
+
+  factory QuickPayRead.fromJson(Map<String, dynamic> j) => QuickPayRead(
+        action: _str(j['action']),
+        person: j['person'] == null ? null : Person.fromJson(j['person'] as Map<String, dynamic>),
+        choices: _list(j['choices'], Person.fromJson),
+        amountPaise: _int(j['amount_paise']),
+        note: _str(j['note']),
+        reply: _str(j['reply']),
+        source: _str(j['source']),
+      );
+}

@@ -5,6 +5,7 @@ import '../../dates.dart';
 import '../../money.dart';
 import '../../models.dart';
 import '../../theme.dart';
+import '../../widgets/ai_mark.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/tag.dart';
 
@@ -123,11 +124,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(color: AppColors.amber500, borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.auto_awesome, size: 16, color: AppColors.amber900),
-            ),
+            const AiMark(size: 28),
             const SizedBox(width: 10),
             Expanded(child: Text('${widget.trip.name} assistant', overflow: TextOverflow.ellipsis)),
           ],
@@ -217,8 +214,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome, color: AppColors.amber900, size: 18),
-              const SizedBox(width: 6),
+              const AiMark(size: 22),
+              const SizedBox(width: 8),
               Expanded(child: Text('Plan', style: AppText.body(color: AppColors.amber900, weight: FontWeight.w700))),
               waiting ? const Tag('Waiting for your OK', kind: TagKind.pending) : const Tag('Sent', kind: TagKind.trip),
             ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../tabs.dart';
 import '../../api.dart';
 import '../../dates.dart';
 import '../../models.dart';
@@ -22,7 +23,10 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
+class _HistoryScreenState extends State<HistoryScreen> with ReloadWhenShown {
+  @override
+  void reloadQuietly() => _reload();
+
   late Future<List<HistoryItem>> _history = api.history();
   String _filter = 'all'; // all, personal, trip
 
@@ -37,7 +41,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         onRetry: _reload,
         builder: (context, items) {
           if (items.isEmpty) {
-            return const EmptyState(icon: Icons.receipt_long_rounded, title: 'No activity yet', body: 'Payments, top-ups and refunds show up here.');
+            return const EmptyState(
+                icon: Icons.receipt_long_rounded, title: 'No activity yet', body: 'Payments, top-ups and refunds show up here.');
           }
           final shown = items.where((h) => _filter == 'all' || (_filter == 'trip') == h.isTrip).toList();
           final rows = <Widget>[];

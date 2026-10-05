@@ -51,6 +51,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
   Widget build(BuildContext context) {
     return FlowScaffold(
       title: 'Your mobile number',
+      hint: 'Type your 10-digit Indian mobile number.',
       subtitle: 'We use it to sign you in, and so friends can find you.',
       buttonLabel: 'Continue',
       busy: _busy,

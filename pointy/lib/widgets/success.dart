@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import 'section_title.dart';
 
 /// The end of a money flow: an animated tick, the amount and the details.
-class SuccessScreen extends StatelessWidget {
+class SuccessScreen extends StatefulWidget {
   const SuccessScreen({
     super.key,
     required this.title,
@@ -27,7 +28,20 @@ class SuccessScreen extends StatelessWidget {
   final bool pending;
 
   @override
+  State<SuccessScreen> createState() => _SuccessScreenState();
+}
+
+class _SuccessScreenState extends State<SuccessScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // A firm tap when money has moved, a light one for a request sent.
+    widget.pending ? HapticFeedback.lightImpact() : HapticFeedback.mediumImpact();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final pending = widget.pending, title = widget.title, amount = widget.amount, subtitle = widget.subtitle, rows = widget.rows, doneLabel = widget.doneLabel;
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -51,7 +65,7 @@ class SuccessScreen extends StatelessWidget {
               Text(title, textAlign: TextAlign.center, style: AppText.heading(color: pending ? AppColors.pending : AppColors.pine700)),
               const SizedBox(height: 4),
               FittedBox(child: Text(amount, style: AppText.balance())),
-              if (subtitle != null) Text(subtitle!, textAlign: TextAlign.center, style: AppText.body(color: AppColors.slate)),
+              if (subtitle != null) Text(subtitle, textAlign: TextAlign.center, style: AppText.body(color: AppColors.slate)),
               const SizedBox(height: 24),
               if (rows.isNotEmpty)
                 SurfaceCard(

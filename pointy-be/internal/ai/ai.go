@@ -20,6 +20,26 @@ type Assistant interface {
 	ParseInstruction(ctx context.Context, in InstructionInput) (Instruction, error)
 	// ReadReceipt reads a photo of a bill into the fields of an expense.
 	ReadReceipt(ctx context.Context, image []byte, mediaType string) (Receipt, error)
+	// ParseQuickPay reads a one-line payment such as "pay Asha 200 for coffee".
+	ParseQuickPay(ctx context.Context, in QuickPayInput) (QuickPay, error)
+}
+
+// QuickPayInput is what the person typed plus the names of people they
+// have paid or been paid by, so the model can pick one of them.
+type QuickPayInput struct {
+	Text     string   `json:"message"`
+	Contacts []string `json:"contacts"`
+}
+
+// QuickPay is what the model understood. Nothing is paid: the app shows it
+// and the person confirms. The amount stays as text for ParseRupees.
+type QuickPay struct {
+	Understood bool   `json:"understood"`
+	Action     string `json:"action"`        // "pay" or "request"
+	Person     string `json:"person"`        // a contact's name as listed, a 10-digit mobile number, or ""
+	Amount     string `json:"amount_rupees"` // "200", "1500.50" or ""
+	Note       string `json:"note"`          // "coffee" or ""
+	Reply      string `json:"reply"`         // one short sentence
 }
 
 // Receipt is what the model read off a bill. Total stays as text and is

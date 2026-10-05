@@ -134,6 +134,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
     return FlowScaffold(
       appBarTitle: 'Add money',
       title: _forTrip ? 'Add to ${widget.trip!.name}' : 'Add money',
+      hint: 'Pick an amount, then choose how to pay.',
       subtitle: _forTrip ? 'It goes into your share of the trip wallet.' : 'Pay with PayPal; it lands in your Pointy balance.',
       buttonLabel: notEnough ? 'Not enough balance' : (_paypal ? 'Continue to PayPal' : 'Add ${paise == null ? '' : formatPaise(paise)}'),
       busy: _busy,

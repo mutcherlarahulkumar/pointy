@@ -121,6 +121,10 @@ ThemeData buildTheme() {
         borderSide: const BorderSide(color: AppColors.pine700, width: 2),
       ),
     ),
+    // Pages slide and fade in the same way everywhere.
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+    }),
     dividerTheme: const DividerThemeData(color: AppColors.line, space: 1),
     chipTheme: base.chipTheme.copyWith(
       backgroundColor: AppColors.surface,

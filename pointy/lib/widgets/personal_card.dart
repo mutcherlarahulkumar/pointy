@@ -39,7 +39,14 @@ class PersonalCard extends StatelessWidget {
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(formatPaise(balancePaise), style: AppText.balance(color: Colors.white)),
+            // The balance counts up or down to its new value (whole paise, no
+            // floating point).
+            child: TweenAnimationBuilder<int>(
+              tween: IntTween(end: balancePaise),
+              duration: const Duration(milliseconds: 700),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => Text(formatPaise(v), style: AppText.balance(color: Colors.white)),
+            ),
           ),
           if (caption != null) Text(caption!, style: AppText.small(color: AppColors.personalBg)),
           if (actions.isNotEmpty) ...[

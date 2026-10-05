@@ -121,6 +121,10 @@ class ApiClient {
   Future<Expense> payPerson(Map<String, dynamic> body, {required String key}) async =>
       Expense.fromJson(await _obj('POST', '/api/payments/personal', body: body, key: key));
 
+  /// Reads "pay Asha 200 for coffee". Pays nothing.
+  Future<QuickPayRead> quickPay(String text) async =>
+      QuickPayRead.fromJson(await _obj('POST', '/api/quick-pay', body: {'text': text}));
+
   // Requests between people
   Future<List<MoneyRequest>> moneyRequests() async => (await _arr('GET', '/api/money-requests')).map(MoneyRequest.fromJson).toList();
   Future<MoneyRequest> requestMoney(String payerId, int amountPaise, String note, {required String key}) async =>

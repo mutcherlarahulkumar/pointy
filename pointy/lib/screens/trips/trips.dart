@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../tabs.dart';
 import '../../api.dart';
 import '../../money.dart';
 import '../../models.dart';
@@ -21,7 +22,10 @@ class TripsScreen extends StatefulWidget {
   State<TripsScreen> createState() => _TripsScreenState();
 }
 
-class _TripsScreenState extends State<TripsScreen> {
+class _TripsScreenState extends State<TripsScreen> with ReloadWhenShown {
+  @override
+  void reloadQuietly() => _reload();
+
   late Future<List<Trip>> _trips = api.trips();
 
   void _reload() => setState(() => _trips = api.trips());
@@ -75,7 +79,8 @@ class _TripsScreenState extends State<TripsScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                OutlinedButton.icon(icon: const Icon(Icons.add), label: const Text('Plan a new trip'), onPressed: () => _go(const NewTripScreen())),
+                OutlinedButton.icon(
+                    icon: const Icon(Icons.add), label: const Text('Plan a new trip'), onPressed: () => _go(const NewTripScreen())),
                 if (done.isNotEmpty) ...[
                   const SectionTitle('Finished'),
                   for (final t in done)

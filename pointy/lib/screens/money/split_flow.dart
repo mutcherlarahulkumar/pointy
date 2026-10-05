@@ -41,6 +41,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> {
       steps: _steps,
       step: 0,
       title: 'What did you pay for?',
+      hint: 'Type the total you paid and what it was for.',
       subtitle: 'Paid the whole bill yourself? Pointy asks everyone for their share.',
       buttonLabel: 'Continue',
       onNext: paise == null || _what.text.trim().isEmpty
@@ -82,6 +83,7 @@ class _SplitPeopleScreenState extends State<_SplitPeopleScreen> {
       steps: _steps,
       step: 1,
       title: 'Who was there?',
+      hint: 'Tick everyone who shared it. You are counted too.',
       buttonLabel: _people.isEmpty ? 'Add at least one person' : 'Continue with ${_people.length + 1} people',
       onNext: _people.isEmpty
           ? null
@@ -156,6 +158,7 @@ class _SplitReviewScreenState extends State<_SplitReviewScreen> {
       steps: _steps,
       step: 2,
       title: '${formatPaise(widget.amountPaise)} for ${widget.what}',
+      hint: 'Check each share, then send the requests.',
       buttonLabel: 'Ask for ${formatPaise(others)}',
       busy: _busy,
       onNext: _send,

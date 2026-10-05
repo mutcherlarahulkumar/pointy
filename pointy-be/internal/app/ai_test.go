@@ -19,6 +19,13 @@ type fakeAI struct {
 	lastInput   ai.InstructionInput
 	receipt     ai.Receipt
 	gotType     string
+	quick       ai.QuickPay
+	quickIn     ai.QuickPayInput
+}
+
+func (f *fakeAI) ParseQuickPay(_ context.Context, in ai.QuickPayInput) (ai.QuickPay, error) {
+	f.quickIn = in
+	return f.quick, f.err
 }
 
 func (f *fakeAI) ReadReceipt(_ context.Context, _ []byte, mediaType string) (ai.Receipt, error) {

@@ -24,6 +24,7 @@ class RequestPersonScreen extends StatelessWidget {
       steps: _steps,
       step: 0,
       title: 'Who should pay you?',
+      hint: 'Pick a friend, or type their mobile number.',
       buttonLabel: 'Choose someone above',
       onNext: null,
       children: [
@@ -38,17 +39,19 @@ class RequestPersonScreen extends StatelessWidget {
 
 /// Step 2: how much and why, then send.
 class RequestAmountScreen extends StatefulWidget {
-  const RequestAmountScreen({super.key, required this.person});
+  const RequestAmountScreen({super.key, required this.person, this.amountPaise, this.note});
 
   final Person person;
+  final int? amountPaise;
+  final String? note;
 
   @override
   State<RequestAmountScreen> createState() => _RequestAmountScreenState();
 }
 
 class _RequestAmountScreenState extends State<RequestAmountScreen> {
-  final _amount = TextEditingController();
-  final _note = TextEditingController();
+  late final _amount = TextEditingController(text: widget.amountPaise == null ? '' : paiseToInput(widget.amountPaise!));
+  late final _note = TextEditingController(text: widget.note ?? '');
   final _key = newIdempotencyKey();
   bool _busy = false;
 
@@ -90,6 +93,7 @@ class _RequestAmountScreenState extends State<RequestAmountScreen> {
       steps: _steps,
       step: 1,
       title: 'How much?',
+      hint: 'Type the amount and what it is for. They pay it from their app.',
       buttonLabel: paise == null ? 'Send request' : 'Ask for ${formatPaise(paise)}',
       busy: _busy,
       onNext: paise == null ? null : () => _send(paise),
