@@ -93,6 +93,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
         _done(paise, 'PayPal (demo mode)');
         return;
       }
+      if (!mounted) return; // left before PayPal answered: do not open it
       setState(() => _deposit = d);
       await launchUrl(url, mode: LaunchMode.externalApplication);
       if (!mounted) return; // left while the browser opened: no polling for a gone screen

@@ -45,8 +45,8 @@ class _SettleScreenState extends State<SettleScreen> {
     setState(() => _busy = true);
     try {
       final done = await api.settle(widget.trip.id, key: _key);
-      setState(() { _settlement = Future.value(done); });
       if (!mounted) return;
+      setState(() { _settlement = Future.value(done); });
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => SuccessScreen(
           title: '${widget.trip.name} is closed',
