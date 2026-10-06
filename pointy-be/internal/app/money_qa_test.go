@@ -146,6 +146,28 @@ func TestParallelPINGuessesAreCapped(t *testing.T) {
 	}
 }
 
+// A payment between balances happens now: a back-dated "at" from the app
+// must not move it into another day (it would slip past a child's daily
+// and monthly limits, and reorder history).
+func TestPersonalPaymentCannotBeBackdated(t *testing.T) {
+	s, c, _, k := family(t)
+	shop := register(t, s, "Shop", "9988776655")
+	old := c.t.AddDate(0, -2, 0)
+	// The daily limit is ₹300; five back-dated ₹100 payments are ₹500 today.
+	var err error
+	for i := 0; i < 5 && err == nil; i++ {
+		_, err = s.PayPersonal(k, ExpenseInput{Description: "Sweets", Amount: domain.Rupees(100), PayeeUserID: shop, At: &old})
+	}
+	if code(err) != "needs_parent" {
+		t.Fatalf("back-dated payments got past the daily limit: %v", err)
+	}
+	for _, h := range s.History(k) {
+		if h.At.Before(c.t) && h.Kind == "payment" {
+			t.Fatalf("payment recorded at %v, before now %v", h.At, c.t)
+		}
+	}
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {

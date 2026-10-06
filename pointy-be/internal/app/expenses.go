@@ -213,6 +213,11 @@ func (s *Service) PayPersonal(userID string, in ExpenseInput) (*domain.Expense, 
 // transferL moves money between two personal balances and records it. The
 // caller commits.
 func (s *Service) transferL(from, to string, in ExpenseInput, alertTitle string) (*domain.Expense, error) {
+	// Money between balances moves now. A time from the app (meant for a
+	// trip expense paid earlier) would let a payment be back-dated out of
+	// a child's daily and monthly limits.
+	now := s.now()
+	in.At = &now
 	if err := s.childSendCheckL(from, in); err != nil {
 		return nil, err
 	}
