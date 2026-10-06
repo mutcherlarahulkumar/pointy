@@ -31,6 +31,9 @@ class FamilyScreen extends StatefulWidget {
 class _FamilyScreenState extends State<FamilyScreen> {
   late Future<FamilyView> _family = api.family();
 
+  // One key per approval and choice: a retry of the same tap cannot pay twice.
+  final _keys = <String, SubmitKey>{};
+
   void _reload() => setState(() { _family = api.family(); });
 
   Future<void> _go(Widget screen) async {
@@ -45,8 +48,9 @@ class _FamilyScreenState extends State<FamilyScreen> {
       if (p == null) return;
       pin = p;
     }
+    final key = _keys.putIfAbsent('${a.id}/$approve', SubmitKey.new);
     try {
-      await api.decideApproval(a.id, approve: approve, pin: pin);
+      await api.decideApproval(a.id, approve: approve, pin: pin, key: key.forRequest(pin));
       if (!mounted) return;
       if (approve) {
         await Navigator.of(context).push(MaterialPageRoute(
@@ -61,9 +65,10 @@ class _FamilyScreenState extends State<FamilyScreen> {
         showMessage(context, 'Declined; nothing was paid');
       }
     } catch (e) {
+      key.failed(e);
       if (mounted) showError(context, e);
     }
-    _reload();
+    if (mounted) _reload();
   }
 
   @override

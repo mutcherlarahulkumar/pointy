@@ -104,10 +104,15 @@ class ApiClient {
     }
     if (res.statusCode >= 400) {
       final err = (decoded is Map ? decoded['error'] : null) as Map<String, dynamic>?;
+      final code = (err?['code'] as String?) ?? 'error';
       final e = ApiException(
         res.statusCode,
-        (err?['code'] as String?) ?? 'error',
-        (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode}). Please try again.',
+        code,
+        // The key mix-up is the app's to fix (screens make a new key after
+        // this error); the person only needs to try again.
+        code == 'idempotency_key_reused'
+            ? 'That did not go through. Please try again.'
+            : (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode}). Please try again.',
         err?['details'] as Map<String, dynamic>?,
       );
       if (e.code == 'signed_out') onSignedOut?.call();
@@ -208,7 +213,8 @@ class ApiClient {
       await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise}, key: key));
   // Pointy Parenting
   Future<FamilyView> family() async => FamilyView.fromJson(await _obj('GET', '/api/family'));
-  Future<FamilyInvite> inviteChild(Map<String, dynamic> body) async => FamilyInvite.fromJson(await _obj('POST', '/api/family/invites', body: body));
+  Future<FamilyInvite> inviteChild(Map<String, dynamic> body, {required String key}) async =>
+      FamilyInvite.fromJson(await _obj('POST', '/api/family/invites', body: body, key: key));
   Future<ChildView> acceptFamilyInvite(String linkId, String code, String pin) async =>
       ChildView.fromJson(await _obj('POST', '/api/family/invites/$linkId/accept', body: {'code': code, 'pin': pin}));
   Future<void> declineFamilyInvite(String linkId) async => _send('POST', '/api/family/invites/$linkId/decline');
@@ -219,10 +225,11 @@ class ApiClient {
       (await _arr('GET', '/api/family/children/$childId/activity')).map(HistoryItem.fromJson).toList();
   Future<String> childCodeKey(String childId, String pin) async =>
       ((await _obj('POST', '/api/family/children/$childId/code-key', body: {'pin': pin}))['secret'] as String?) ?? '';
-  Future<Approval> askApproval(String payeeId, int amountPaise, String note) async =>
-      Approval.fromJson(await _obj('POST', '/api/family/approvals', body: {'payee_id': payeeId, 'amount_paise': amountPaise, 'note': note}));
-  Future<Approval> decideApproval(String id, {required bool approve, String pin = ''}) async =>
-      Approval.fromJson(await _obj('POST', '/api/family/approvals/$id/${approve ? 'approve' : 'decline'}', body: {'pin': pin}));
+  Future<Approval> askApproval(String payeeId, int amountPaise, String note, {required String key}) async => Approval.fromJson(
+      await _obj('POST', '/api/family/approvals', body: {'payee_id': payeeId, 'amount_paise': amountPaise, 'note': note}, key: key));
+  /// Approving pays the child's payment, so it carries a key like any payment.
+  Future<Approval> decideApproval(String id, {required bool approve, String pin = '', required String key}) async => Approval.fromJson(
+      await _obj('POST', '/api/family/approvals/$id/${approve ? 'approve' : 'decline'}', body: {'pin': pin}, key: key));
 
   // The trip's shopping agent and group purchases
   Future<AgentAnswer> shopAgent(String tripId, String text) async =>

@@ -9,6 +9,7 @@ import 'package:pointy/payment_lock.dart';
 import 'package:pointy/screens/family/add_child.dart';
 import 'package:pointy/screens/family/child_detail.dart';
 import 'package:pointy/screens/family/family.dart';
+import 'package:pointy/screens/money/pay_flow.dart';
 import 'package:pointy/theme.dart';
 
 import 'fakes.dart';
@@ -98,5 +99,79 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('This code ran out. Start again.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox()); // stops its timers
+  });
+
+  const approval = '{"id":"ap_1","child":{"id":"$_kid","name":"Riya Rao"},"payee":{"id":"u_shop","name":"Corner shop"},'
+      '"amount_paise":50000,"note":"Book","reason":"daily","status":"pending","ends":"2026-10-06T12:00:00+05:30"}';
+
+  testWidgets('approving a child\'s payment sends an Idempotency-Key, new after a refusal', (tester) async {
+    phone(tester);
+    api = fakeApi(log: sent, overrides: {
+      'GET /api/family': (200, '{"role":"parent","children":[$_child],"approvals":[$approval],"rules":{}}'),
+      'POST /api/auth/verify-pin': (200, '{"ok":true}'),
+      'POST /api/family/approvals/ap_1/approve': (409, '{"error":{"code":"insufficient_balance","message":"not enough"}}'),
+    })..userId = _me;
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const FamilyScreen()));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      await typePin(tester);
+      tester.state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger)).removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+    }
+    final keys = [for (final r in sent.where((r) => r.url.path.endsWith('/approve'))) r.headers['Idempotency-Key']];
+    expect(keys, hasLength(2));
+    expect(keys.every((k) => k != null && k.isNotEmpty), isTrue);
+    expect(keys[1], isNot(keys[0]), reason: 'the server keeps the 409 under the first key');
+  });
+
+  testWidgets('a child asking a parent sends an Idempotency-Key; three waiting asks get a clear message', (tester) async {
+    phone(tester);
+    api = fakeApi(log: sent, overrides: {
+      'POST /api/auth/verify-pin': (200, '{"ok":true}'),
+      'POST /api/payments/personal': (409, '{"error":{"code":"needs_parent","message":"over your daily limit","details":{"parent":"Asha"}}}'),
+      'POST /api/family/approvals': (409, '{"error":{"code":"too_many_asks","message":"wait for an answer to the ones you have asked"}}'),
+    })..userId = _kid;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: PayConfirmScreen(person: Person(id: 'u_shop', name: 'Corner shop', phone: '9000000002'), amountPaise: 20000, note: 'Book'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pay ₹200'));
+    await tester.pumpAndSettle();
+    await typePin(tester);
+    await tester.tap(find.text('Ask Asha on their phone'));
+    await tester.pumpAndSettle();
+    final ask = sent.lastWhere((r) => r.url.path == '/api/family/approvals');
+    expect(ask.headers['Idempotency-Key'], isNotNull);
+    expect(find.text('Asha has 3 asks to answer already. Wait for an answer, then ask again.'), findsOneWidget);
+  });
+
+  testWidgets('too many wrong parent codes explains the wait', (tester) async {
+    phone(tester);
+    api = fakeApi(log: sent, overrides: {
+      'POST /api/auth/verify-pin': (200, '{"ok":true}'),
+      'POST /api/payments/personal': (
+        429,
+        '{"error":{"code":"too_many_codes","message":"too many wrong codes; try again in 15 minutes or ask Asha to approve it"}}'
+      ),
+    })..userId = _kid;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: PayConfirmScreen(person: Person(id: 'u_shop', name: 'Corner shop', phone: '9000000002'), amountPaise: 20000, note: 'Book'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pay ₹200'));
+    await tester.pumpAndSettle();
+    await typePin(tester);
+    expect(find.textContaining('Too many wrong codes'), findsOneWidget);
+    expect(find.text('Pay ₹200'), findsOneWidget); // not stuck spinning
+  });
+
+  test('inviting a child sends an Idempotency-Key', () async {
+    api = fakeApi(log: sent, overrides: {'POST /api/family/invites': (201, '{"child":$_child,"code":"123456"}')});
+    await api.inviteChild({'child_phone': '9000000001'}, key: 'k1');
+    expect(sent.last.headers['Idempotency-Key'], 'k1');
   });
 }

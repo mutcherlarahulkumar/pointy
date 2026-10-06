@@ -166,6 +166,7 @@ class _LimitsScreenState extends State<_LimitsScreen> {
   late final _daily = TextEditingController(text: paiseToInput(widget.d.dailyPaise));
   late final _monthly = TextEditingController(text: paiseToInput(widget.d.monthlyPaise));
   bool _busy = false;
+  final _key = SubmitKey();
 
   static const _maxMonth = 1000000; // ₹10,000, the RBI cap for small wallets
 
@@ -183,18 +184,20 @@ class _LimitsScreenState extends State<_LimitsScreen> {
     setState(() => _busy = true);
     try {
       final b = d.birth!;
-      final inv = await api.inviteChild({
+      final body = {
         'child_phone': d.phone,
         'birth_date': '${b.year}-${b.month.toString().padLeft(2, '0')}-${b.day.toString().padLeft(2, '0')}',
         'daily_limit_paise': daily,
         'monthly_limit_paise': monthly,
         'accept_terms': familyTermsVersion,
         'pin': pin,
-      });
+      };
+      final inv = await api.inviteChild(body, key: _key.forRequest(body));
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.settings.name == 'family' || r.isFirst);
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => PairingCodeScreen(invite: inv)));
     } catch (e) {
+      _key.failed(e);
       if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);

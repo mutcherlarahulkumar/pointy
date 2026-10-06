@@ -114,6 +114,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   // One key per payment: a double tap or a retry cannot pay twice.
   final _key = SubmitKey();
   bool _busy = false;
+  final _askKey = SubmitKey();
 
   Future<void> _pay({String parentCode = ''}) async {
     // A parent's code is the OK for this payment; the PIN was asked already.
@@ -182,7 +183,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       return;
     }
     try {
-      await api.askApproval(widget.person.id, widget.amountPaise, widget.note);
+      await api.askApproval(widget.person.id, widget.amountPaise, widget.note, key: _askKey.forRequest(null));
       if (!mounted) return;
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
       nav.push(MaterialPageRoute(
@@ -194,7 +195,11 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
         ),
       ));
     } catch (err) {
-      if (mounted) showError(context, err);
+      _askKey.failed(err);
+      if (!mounted) return;
+      showError(context, err is ApiException && err.code == 'too_many_asks'
+          ? '$parent has 3 asks to answer already. Wait for an answer, then ask again.'
+          : err);
     }
   }
 
