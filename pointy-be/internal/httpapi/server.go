@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -25,13 +26,17 @@ type server struct {
 	pp  paypal.Client
 
 	mu   sync.Mutex
-	idem map[string]replay // Idempotency-Key -> first response
+	idem map[string]*replay // Idempotency-Key -> first response
 }
 
+// replay is the first answer to a request with an Idempotency-Key. While
+// that request is still running, done is open and retries wait for it.
 type replay struct {
-	status int
-	body   []byte
-	at     time.Time
+	fingerprint [32]byte // hash of the request body
+	done        chan struct{}
+	status      int
+	body        []byte
+	at          time.Time
 }
 
 type ctxKey struct{}
@@ -52,7 +57,7 @@ func bearer(r *http.Request) string {
 
 // New builds the router.
 func New(svc *app.Service, pp paypal.Client) http.Handler {
-	s := &server{svc: svc, pp: pp, idem: map[string]replay{}}
+	s := &server{svc: svc, pp: pp, idem: map[string]*replay{}}
 	mux := http.NewServeMux()
 
 	// handle registers a JSON endpoint. Unless public is true the caller
@@ -632,36 +637,72 @@ func (r *recorder) Write(b []byte) (int, error) {
 
 // idempotent replays the first answer when a write is retried with the same
 // Idempotency-Key, so a double tap or a flaky network cannot pay twice.
-// Answers are kept for a day.
+// Keys belong to the signed-in caller; a retry that arrives while the first
+// request is still running waits for its answer; the same key with a
+// different body is refused. Answers are kept for a day.
 func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(http.ResponseWriter)) {
 	key := r.Header.Get("Idempotency-Key")
-	if key == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
+	// Sign-in and sign-up have no caller yet, so a key there could replay
+	// one person's token to another: they are never replayed.
+	if key == "" || userID(r) == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
 		next(w)
 		return
 	}
 	key = userID(r) + "|" + r.Method + "|" + r.URL.Path + "|" + key
-	s.mu.Lock()
-	old, seen := s.idem[key]
-	if len(s.idem) > 5000 {
-		for k, v := range s.idem {
-			if time.Since(v.at) > 24*time.Hour {
-				delete(s.idem, k)
-			}
-		}
+	// Hash the body, then hand the handler the same bytes.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	if err != nil {
+		writeErr(w, domain.Invalid("unreadable body"))
+		return
 	}
-	s.mu.Unlock()
-	if seen {
+	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), r.Body))
+	fp := sha256.Sum256(raw)
+
+	for {
+		s.mu.Lock()
+		old, seen := s.idem[key]
+		if !seen {
+			break // still locked
+		}
+		s.mu.Unlock()
+		if old.fingerprint != fp {
+			writeErr(w, &domain.Error{Status: http.StatusUnprocessableEntity, Code: "idempotency_key_reused",
+				Message: "this Idempotency-Key was already used for a different request; make a new key"})
+			return
+		}
+		<-old.done
+		if old.status == 0 {
+			continue // the first try failed with a server error: run it again
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Idempotent-Replay", "true")
 		w.WriteHeader(old.status)
 		_, _ = w.Write(old.body)
 		return
 	}
-	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
-	next(rec)
-	if rec.status < 500 { // a server error may be retried for real
-		s.mu.Lock()
-		s.idem[key] = replay{rec.status, rec.body.Bytes(), time.Now()}
-		s.mu.Unlock()
+	mine := &replay{fingerprint: fp, done: make(chan struct{})}
+	s.idem[key] = mine
+	if len(s.idem) > 5000 {
+		for k, v := range s.idem {
+			if v.status != 0 && time.Since(v.at) > 24*time.Hour {
+				delete(s.idem, k)
+			}
+		}
 	}
+	s.mu.Unlock()
+
+	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
+	finished := false
+	defer func() { // also runs if the handler panics
+		s.mu.Lock()
+		if finished && rec.status < 500 { // a server error may be retried for real
+			mine.status, mine.body, mine.at = rec.status, rec.body.Bytes(), time.Now()
+		} else {
+			delete(s.idem, key)
+		}
+		s.mu.Unlock()
+		close(mine.done)
+	}()
+	next(rec)
+	finished = true
 }

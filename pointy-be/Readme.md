@@ -61,7 +61,7 @@ The service runs as **one instance per database** (its in-memory copy is not sha
 
 ## API
 
-All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is integer paise. Send `Idempotency-Key` on every POST that moves money; a retry with the same key replays the first answer.
+All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is integer paise. Send `Idempotency-Key` on every POST that moves money; a retry with the same key replays the first answer (a retry while the first is still running waits for it). Keys are per signed-in user and ignored before sign-in (check-phone, register, login); the same key with a different body gets `422 idempotency_key_reused`, so make a new key when the request changes.
 
 | Area | Routes |
 |---|---|
