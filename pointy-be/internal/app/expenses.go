@@ -113,6 +113,10 @@ func (s *Service) prepareExpenseL(tripID, userID string, in *ExpenseInput) (*dom
 		if _, ok := s.users[in.PayeeUserID]; !ok {
 			return nil, nil, none, domain.Invalid("choose who on Pointy gets the money")
 		}
+		// A child's wallet keeps its small-wallet caps, whoever pays it.
+		if err := s.childReceiveCheckL(in.PayeeUserID, in.Amount); err != nil {
+			return nil, nil, none, err
+		}
 	default:
 		return nil, nil, none, domain.Invalid("mode must be %q or %q", ModeMember, ModeReimburse)
 	}

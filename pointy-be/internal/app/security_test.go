@@ -59,3 +59,21 @@ func TestApprovalEndsWhenTheChildTurns18(t *testing.T) {
 		t.Fatal("money left an adult's account on the ex-parent's say-so")
 	}
 }
+
+// Trip payments to a Pointy user cannot push a child's wallet over the
+// small-wallet caps.
+func TestTripPaymentToAChildKeepsTheCaps(t *testing.T) {
+	s, _, _, k := family(t)
+	a := register(t, s, "Asha", "9811111111")
+	b := register(t, s, "Dev", "9822222222")
+	topUp(t, s, a, 20000)
+	topUp(t, s, b, 20000)
+	trip := goa(t, s, a, b)
+	must[TripView](t)(s.DepositFromBalance(trip, a, domain.Rupees(15000)))
+	must[TripView](t)(s.DepositFromBalance(trip, b, domain.Rupees(15000)))
+	_, err := s.AddExpense(trip, a, ExpenseInput{Description: "Gift", Amount: domain.Rupees(20000), Mode: ModeMember, PayeeUserID: k, ConfirmOverBudget: true})
+	if code(err) != "child_balance_cap" {
+		t.Fatalf("trip paid a child past the cap: %v", err)
+	}
+	checkBooks(t, s)
+}
