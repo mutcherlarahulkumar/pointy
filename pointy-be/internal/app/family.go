@@ -776,12 +776,9 @@ func (s *Service) DecideApproval(parentID, id string, approve bool, pin string) 
 		return s.approvalViewL(a), nil
 	}
 	in := ExpenseInput{Description: firstNonEmpty(a.Note, "Approved by "+s.name(parentID)), Category: domain.Other, Amount: a.Amount, At: &now, parentApproved: true}
-	if err := s.childReceiveCheckL(a.PayeeID, a.Amount); err != nil {
-		return ApprovalView{}, err
-	}
 	e, err := s.transferL(a.ChildID, a.PayeeID, in, "")
 	if err != nil {
-		s.pending = nil
+		_ = s.commitL() // keep any expiry above; transferL changed nothing
 		return ApprovalView{}, err
 	}
 	a.Status, a.DecidedAt, a.ExpenseID = "approved", &now, e.ID

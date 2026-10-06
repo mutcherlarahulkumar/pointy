@@ -62,3 +62,17 @@ func TestChildCannotFloodTheParentWithAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Adding people is all or nothing: one unknown id adds nobody.
+func TestAddMembersIsAllOrNothing(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a)
+	if _, err := s.AddMembers(trip, a, []string{d, "u_nobody"}); code(err) != "invalid" {
+		t.Fatalf("unknown member: %v", err)
+	}
+	if _, err := s.Trip(trip, d); code(err) != "not_found" && code(err) != "forbidden" {
+		t.Fatalf("Dev was added by a refused call: %v", err)
+	}
+}

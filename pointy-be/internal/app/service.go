@@ -387,6 +387,7 @@ func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, err
 	if t.OrganiserID != userID {
 		return TripView{}, domain.Forbidden("only the organiser can add people")
 	}
+	// Check everyone first: a refused call must add nobody.
 	for _, m := range ids {
 		if _, ok := s.users[m]; !ok {
 			return TripView{}, domain.Invalid("unknown member %q", m)
@@ -394,6 +395,8 @@ func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, err
 		if s.isChildL(m) {
 			return TripView{}, domain.Conflict("child_account", s.name(m)+" has a child account, which cannot join trip wallets", nil)
 		}
+	}
+	for _, m := range ids {
 		if !t.HasMember(m) {
 			t.Members = append(t.Members, m)
 			s.alertL(t.ID, m, "trip", s.name(userID)+" added you to "+t.Name, "Open the trip to see the plan")

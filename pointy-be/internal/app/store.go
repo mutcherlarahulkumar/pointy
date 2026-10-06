@@ -50,7 +50,9 @@ type MemoryStore struct{}
 func (MemoryStore) Load(context.Context) (*Snapshot, error) { return &Snapshot{}, nil }
 func (MemoryStore) Save(context.Context, []any) error       { return nil }
 
-// track marks an object as changed by the operation in progress.
+// track marks an object as changed by the operation in progress. Check
+// everything before changing anything: a call that fails after tracking
+// leaves its changes in memory, and the next commit saves them.
 func (s *Service) track(items ...any) { s.pending = append(s.pending, items...) }
 
 // commitL saves every tracked change in one transaction. If the database
