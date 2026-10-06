@@ -408,8 +408,20 @@ func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID st
 		s.mu.Unlock()
 		return nil, domain.Conflict("group_buy_closed", "this purchase is "+status+"; nothing was charged", nil)
 	}
+	if sh.Status == "in" {
+		// They said yes another way (or this approval was sent twice) while
+		// PayPal answered: keep one yes and let a second hold go.
+		spare := sh.AuthID != authID
+		s.mu.Unlock()
+		if spare {
+			if err := s.pp.VoidAuthorization(ctx, authID); err != nil {
+				log.Printf("group buy %s: void spare authorization: %v", g.ID, err)
+			}
+		}
+		return s.maybeFinish(ctx, g.ID)
+	}
 	now := s.now()
-	sh.Status, sh.AuthID, sh.ApproveURL, sh.CommittedAt = "in", authID, "", &now
+	sh.Status, sh.Via, sh.AuthID, sh.ApproveURL, sh.CommittedAt = "in", ViaPayPal, authID, "", &now
 	s.track(g)
 	s.alertL(g.TripID, "", "group_buy", s.name(sh.UserID)+" is in for "+shortTitle(g.Item.Title), s.groupBuyProgressL(g))
 	err = s.commitL()
