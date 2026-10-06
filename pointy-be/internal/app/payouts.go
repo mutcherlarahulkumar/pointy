@@ -86,6 +86,9 @@ func (s *Service) Withdraw(ctx context.Context, userID string, amount Paise) (*d
 		return nil, domain.Conflict("insufficient_balance", "your balance is "+INR(avail)+"; you can withdraw up to that", map[string]any{"balance_paise": avail})
 	}
 	p := &domain.Payout{ID: newID("po"), UserID: userID, Kind: PayoutWithdraw, Email: u.PayPalEmail, Description: "Withdrawal from Pointy", Amount: amount, Status: "sending", CreatedAt: s.now()}
+	// Hold the money before letting go of the lock: otherwise a second
+	// withdrawal or payment could pass the balance check in between.
+	s.holds[acc] += amount
 	s.mu.Unlock()
 	if err := s.payOut(ctx, p, acc); err != nil {
 		return p, err
@@ -93,15 +96,12 @@ func (s *Service) Withdraw(ctx context.Context, userID string, amount Paise) (*d
 	return p, nil
 }
 
-// payOut sends p through PayPal. The money is held in the balance while
-// PayPal is called, so it cannot be spent twice. When PayPal accepts, one
+// payOut sends p through PayPal. The caller has already held p.Amount in
+// acc (under the same lock as its balance check), so it cannot be spent
+// twice while PayPal is called; payOut releases the hold. When PayPal accepts, one
 // balanced entry moves it out of the business account; when it refuses,
 // nothing is posted, the hold is released and the payout is kept as failed.
 func (s *Service) payOut(ctx context.Context, p *domain.Payout, acc string) error {
-	s.mu.Lock()
-	s.holds[acc] += p.Amount
-	s.mu.Unlock()
-
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	res, perr := s.pp.SendPayout(cctx, p.ID, p.Email, p.Amount, p.Description)
 	cancel()
