@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"net/http"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ var (
 	inviteWindow     = 10 * time.Minute
 	approvalWindow   = 30 * time.Minute
 	maxCodeAttempts  = 5
+	codeLockout      = 15 * time.Minute // after maxCodeAttempts wrong parent codes
 	totpStep         = int64(30)
 	familyAdultYears = 18
 )
@@ -159,10 +161,26 @@ func (s *Service) childSendCheckL(from string, in ExpenseInput) error {
 		return nil
 	}
 	if code := strings.TrimSpace(in.ParentCode); code != "" {
+		// Wrong codes are counted, so a 6-digit code cannot be guessed by
+		// trying them all.
+		now := s.now()
+		recent := s.failedCodes[l.ID][:0:0]
+		for _, at := range s.failedCodes[l.ID] {
+			if now.Sub(at) < codeLockout {
+				recent = append(recent, at)
+			}
+		}
+		s.failedCodes[l.ID] = recent
+		if len(recent) >= maxCodeAttempts {
+			return &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_codes", Message: "too many wrong codes; try again in 15 minutes or ask " + s.name(l.ParentID) + " to approve it"}
+		}
 		if s.useTOTPL(l, code) {
+			delete(s.failedCodes, l.ID)
 			return nil
 		}
-		return domain.Conflict("wrong_parent_code", "that code is not right or has been used; ask "+s.name(l.ParentID)+" for the code shown now", nil)
+		s.failedCodes[l.ID] = append(recent, now)
+		return domain.Conflict("wrong_parent_code", "that code is not right or has been used; ask "+s.name(l.ParentID)+" for the code shown now",
+			map[string]int{"attempts_left": max(0, maxCodeAttempts-len(s.failedCodes[l.ID]))})
 	}
 	return domain.Conflict("needs_parent", "this is over your "+reason+" limit. Ask "+s.name(l.ParentID)+" to approve it", map[string]any{
 		"reason": reason, "parent": s.name(l.ParentID),
