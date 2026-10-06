@@ -254,7 +254,7 @@ func (s *Service) SplitBill(userID string, in SplitBillInput) (SplitBillResult, 
 		if sh.UserID == userID || sh.Amount == 0 {
 			continue
 		}
-		r, err := s.requestMoneyL(userID, MoneyRequestInput{PayerID: sh.UserID, Amount: sh.Amount, Note: "Your share of " + in.Description})
+		r, err := s.requestMoneyL(userID, MoneyRequestInput{PayerID: sh.UserID, Amount: sh.Amount, Note: fitNote("Your share of " + in.Description)})
 		if err != nil {
 			s.pending = nil
 			return SplitBillResult{}, err
@@ -417,7 +417,11 @@ func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResul
 
 // itemNote is "Dinner: Paneer tikka, Lime soda" cut to fit a request note.
 func itemNote(desc string, items []string) string {
-	note := desc + ": " + strings.Join(items, ", ")
+	return fitNote(desc + ": " + strings.Join(items, ", "))
+}
+
+// fitNote cuts a note the app wrote to the 80 letters a request note holds.
+func fitNote(note string) string {
 	if r := []rune(note); len(r) > 80 {
 		note = strings.TrimSpace(string(r[:79])) + "…"
 	}

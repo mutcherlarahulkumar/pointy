@@ -327,6 +327,23 @@ func TestTripPaymentToChildKeepsChildCaps(t *testing.T) {
 	checkBooks(t, s)
 }
 
+// Splitting a bill with a long description still sends the requests: the
+// note "Your share of ..." is cut to fit, not refused as the person's own
+// note would be.
+func TestSplitBillLongDescription(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	desc := "Birthday dinner at the rooftop place near the station, with cake and drinks"
+	res, err := s.SplitBill(a, SplitBillInput{Description: desc, Amount: 100000, Participants: []domain.SplitInput{{UserID: a}, {UserID: d}}})
+	if err != nil {
+		t.Fatalf("%d-letter description: %v", len(desc), err)
+	}
+	if n := len([]rune(res.Requests[0].Note)); n > 80 {
+		t.Fatalf("note of %d letters", n)
+	}
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {
