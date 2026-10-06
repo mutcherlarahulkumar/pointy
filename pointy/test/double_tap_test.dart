@@ -14,6 +14,12 @@ import 'payment_lock_test.dart' show FakeLock;
 const _paid = '{"id":"exp_1","kind":"transfer","description":"Chai","category":"other","amount_paise":20000,'
     '"payee":"Dev Mehta","shares":[],"at":"2026-10-05T12:00:00+05:30"}';
 
+class _CountReplacements extends NavigatorObserver {
+  int replaced = 0;
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) => replaced++;
+}
+
 void main() {
   final sent = <http.Request>[];
 
@@ -70,6 +76,31 @@ void main() {
     await typePin(tester);
     if (find.text('Enter your PIN').evaluate().isNotEmpty) await typePin(tester);
     expect(sent.where((r) => r.url.path.endsWith('/deposits')), hasLength(1));
+  });
+
+  testWidgets('PayPal top-up: two checks finding it paid show the result once', (tester) async {
+    phone(tester);
+    const created = '{"id":"dep_1","amount_paise":50000,"paypal_order_id":"O1","approve_url":"https://www.sandbox.paypal.com/x","status":"created"}';
+    const captured = '{"id":"dep_1","amount_paise":50000,"paypal_order_id":"O1","status":"captured"}';
+    api = fakeApi(log: sent, overrides: {'POST /api/topups': (201, created), 'GET /api/deposits/O1': (200, captured)});
+    final nav = _CountReplacements();
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), navigatorObservers: [nav], home: const TopUpScreen(suggestPaise: 50000)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to PayPal'));
+    // The waiting screen spins, so it never settles: pump step by step.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    ScaffoldMessenger.of(tester.element(find.text("I've approved it"))).removeCurrentSnackBar(); // no browser in tests
+    await tester.pump(const Duration(milliseconds: 500));
+    // The automatic check and the person's tap land together.
+    await tester.tap(find.text("I've approved it"));
+    await tester.tap(find.text("I've approved it"));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    expect(find.text('Money added'), findsOneWidget);
+    expect(nav.replaced, 1);
   });
 
   testWidgets('with fingerprint, a double tap pays once', (tester) async {

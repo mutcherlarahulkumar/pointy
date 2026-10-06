@@ -35,6 +35,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
   Deposit? _deposit; // a PayPal checkout waiting for approval
   Timer? _poll;
   bool _busy = false;
+  bool _finished = false; // the result is on screen; later checks are ignored
   Me? _me;
 
   bool get _forTrip => widget.trip != null;
@@ -94,6 +95,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
       }
       setState(() => _deposit = d);
       await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (!mounted) return; // left while the browser opened: no polling for a gone screen
       _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check(quiet: true));
     } catch (e) {
       if (mounted) showError(context, e);
@@ -117,7 +119,9 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
 
   void _done(int paise, String via) {
     _poll?.cancel();
-    if (!mounted) return;
+    // The timer, the app coming back and the button can all find it paid.
+    if (!mounted || _finished) return;
+    _finished = true;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
       builder: (_) => SuccessScreen(
         title: 'Money added',
