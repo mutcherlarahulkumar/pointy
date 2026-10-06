@@ -93,6 +93,23 @@ func TestQASplitRefusesOverflow(t *testing.T) {
 	}
 }
 
+// A budget so large that budget maths wraps around int64 is refused, both
+// when planning a trip and when changing budgets later.
+func TestQAHugeBudgetIsRefused(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	trip := goa(t, s, a)
+	huge := Paise(1) << 61
+	if _, err := s.SetBudgets(trip, a, map[domain.Category]Paise{domain.Food: huge, domain.Stay: huge, domain.Other: huge, domain.Transport: huge}); code(err) != "invalid" {
+		v, _ := s.Budgets(trip, a)
+		t.Fatalf("huge budgets: %v (total limit %d)", err, v.Limit)
+	}
+	_, err := s.CreateTrip(a, CreateTripInput{Name: "x", Start: s.now(), End: s.now(), Budgets: map[domain.Category]Paise{domain.Food: huge}})
+	if code(err) != "invalid" {
+		t.Fatalf("huge budget on a new trip: %v", err)
+	}
+}
+
 // hookPP lets a test run something while PayPal is placing a hold, the
 // moment the service has let go of its lock.
 type hookPP struct {

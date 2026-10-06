@@ -33,6 +33,10 @@ const LowShare = Paise(100000) // ₹1,000
 // MaxAmount caps one payment or top-up, to catch typos.
 const MaxAmount = Paise(10000000) // ₹1,00,000
 
+// MaxBudget caps one category's trip budget, so budget maths never
+// overflows.
+const MaxBudget = 1000 * MaxAmount // ₹10,00,00,000
+
 // IST is India Standard Time. Times are shown and bucketed in it.
 var IST = time.FixedZone("IST", 5*3600+1800)
 
@@ -344,7 +348,7 @@ func (s *Service) CreateTrip(userID string, in CreateTripInput) (TripView, error
 	}
 	budgets := map[domain.Category]Paise{}
 	for c, v := range in.Budgets {
-		if !domain.ValidCategory(c) || v < 0 {
+		if !domain.ValidCategory(c) || v < 0 || v > MaxBudget {
 			return TripView{}, domain.Invalid("bad budget for %q", c)
 		}
 		budgets[c] = v
