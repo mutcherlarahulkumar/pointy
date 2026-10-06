@@ -361,6 +361,7 @@ func (s *Service) JoinGroupBuy(ctx context.Context, id, userID, via string) (*do
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		g, sh = s.currentL(g, userID)
 		if g.Status != "open" {
 			return nil, domain.Conflict("group_buy_closed", "this purchase is "+g.Status, nil)
 		}
@@ -403,6 +404,7 @@ func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID st
 	ctx = context.WithoutCancel(ctx)
 
 	s.mu.Lock()
+	g, sh = s.currentL(g, sh.UserID)
 	if g.Status != "open" || s.overdueL(g) {
 		s.mu.Unlock()
 		s.expireDue(ctx)
@@ -437,6 +439,18 @@ func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID st
 		return nil, err
 	}
 	return s.maybeFinish(ctx, g.ID)
+}
+
+// currentL finds the purchase and person's share again after the lock was
+// let go: a failed save elsewhere reloads the state as new objects, and
+// changes to the old ones would be lost.
+func (s *Service) currentL(g *domain.GroupBuy, userID string) (*domain.GroupBuy, *domain.GroupBuyShare) {
+	for _, x := range s.groupBuys {
+		if x.ID == g.ID {
+			return x, shareOf(x, userID)
+		}
+	}
+	return g, shareOf(g, userID)
 }
 
 // IsGroupBuyOrder says whether a PayPal order belongs to a group purchase.
@@ -511,6 +525,7 @@ func (s *Service) expireDue(ctx context.Context) {
 func (s *Service) closeGroupBuy(ctx context.Context, g *domain.GroupBuy, status, note string) (*domain.GroupBuy, error) {
 	ctx = context.WithoutCancel(ctx) // the voids must run even if the phone hangs up
 	s.mu.Lock()
+	g, _ = s.currentL(g, "")
 	if g.Status != "open" {
 		s.mu.Unlock()
 		return g, nil
@@ -593,6 +608,8 @@ func (s *Service) maybeFinish(ctx context.Context, id string) (*domain.GroupBuy,
 	}
 
 	s.mu.Lock()
+	g, _ = s.currentL(g, "")
+	g.Status = "paying"
 	now := s.now()
 	t := s.trips[g.TripID]
 	// PayPal money that was taken becomes the person's trip share, as if

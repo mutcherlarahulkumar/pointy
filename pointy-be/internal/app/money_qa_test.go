@@ -34,6 +34,7 @@ type flakyStore struct {
 	fail     bool
 	deposits []domain.Deposit
 	payouts  []domain.Payout
+	groupBuys []domain.GroupBuy
 }
 
 func (f *flakyStore) Save(ctx context.Context, items []any) error {
@@ -50,6 +51,10 @@ func (f *flakyStore) Save(ctx context.Context, items []any) error {
 			f.deposits = upsert(f.deposits, *v, func(a, b domain.Deposit) bool { return a.OrderID == b.OrderID })
 		case *domain.Payout:
 			f.payouts = upsert(f.payouts, *v, func(a, b domain.Payout) bool { return a.ID == b.ID })
+		case *domain.GroupBuy:
+			c := *v
+			c.Shares = append([]domain.GroupBuyShare(nil), v.Shares...)
+			f.groupBuys = upsert(f.groupBuys, c, func(a, b domain.GroupBuy) bool { return a.ID == b.ID })
 		default:
 			rest = append(rest, it)
 		}
@@ -81,6 +86,10 @@ func (f *flakyStore) Load(ctx context.Context) (*Snapshot, error) {
 	for _, p := range f.payouts {
 		p := p
 		snap.Payouts = append(snap.Payouts, &p)
+	}
+	for _, g := range f.groupBuys {
+		g.Shares = append([]domain.GroupBuyShare(nil), g.Shares...)
+		snap.GroupBuys = append(snap.GroupBuys, &g)
 	}
 	return snap, nil
 }

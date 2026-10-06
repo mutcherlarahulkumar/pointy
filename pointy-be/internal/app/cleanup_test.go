@@ -101,3 +101,51 @@ func TestWebhookPlacesGroupBuyHold(t *testing.T) {
 	}
 	checkBooks(t, s)
 }
+
+// blockAuthPP holds AuthorizeOrder until released.
+type blockAuthPP struct {
+	*blockingPayPal
+	blockAuth bool
+}
+
+func (p *blockAuthPP) AuthorizeOrder(ctx context.Context, orderID string) (string, error) {
+	if p.blockAuth {
+		p.entered <- struct{}{}
+		<-p.release
+	}
+	return p.Mock.AuthorizeOrder(ctx, orderID)
+}
+
+// A failed save while PayPal places a hold reloads the purchase as a new
+// object. The hold must land on the purchase as it is now, not be lost on
+// the old copy.
+func TestGroupBuyHoldSurvivesAReload(t *testing.T) {
+	_, st, bpp := newFlakyService(t)
+	pp := &blockAuthPP{blockingPayPal: bpp}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	must[struct{}](t)(struct{}{}, s.Load(context.Background()))
+	s.SetShopper(shop.Demo{})
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	g := propose(t, s, trip, a, "beach towels")
+	g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, a, ViaPayPal))
+	order := shareOf(g, a).OrderID
+	pp.blockAuth = true
+	done := make(chan error)
+	go func() { _, err := s.AuthorizeGroupBuyOrder(ctx, order, a); done <- err }()
+	<-pp.entered
+	st.failNextSave()
+	_ = s.MarkAlertsSeen(a) // fails and reloads everything
+	pp.blockAuth = false
+	close(pp.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	now := must[*domain.GroupBuy](t)(s.GroupBuy(ctx, g.ID, a))
+	if sh := shareOf(now, a); sh.Status != "in" || sh.AuthID == "" {
+		t.Fatalf("hold lost after the reload: %+v", sh)
+	}
+}
