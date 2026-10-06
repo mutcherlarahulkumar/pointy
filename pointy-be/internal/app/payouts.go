@@ -181,6 +181,14 @@ func (s *Service) RefreshPayouts(ctx context.Context, userID string) {
 			continue
 		}
 		s.mu.Lock()
+		// The state may have been reloaded while PayPal answered: use the
+		// payout as it is now.
+		for _, cur := range s.payouts {
+			if cur.ID == p.ID {
+				p = cur
+				break
+			}
+		}
 		before := p.Status
 		s.setPayoutStatusL(p, status)
 		if p.Status != before {
@@ -199,6 +207,9 @@ func (s *Service) RefreshPayouts(ctx context.Context, userID string) {
 // reversePayoutL gives back a payout PayPal returned: the opposite of its
 // payout entry.
 func (s *Service) reversePayoutL(p *domain.Payout) {
+	if s.ledgerHasRefL(p.ID, "payout_return") {
+		return // given back already
+	}
 	for _, e := range s.ledger.Entries() {
 		if (e.Kind != "payout" && e.Kind != "spend") || e.Ref != p.ID {
 			continue

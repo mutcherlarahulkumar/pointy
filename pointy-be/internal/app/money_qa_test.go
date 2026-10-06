@@ -25,11 +25,15 @@ func (p *slowPayPal) SendPayout(ctx context.Context, ref, email string, amount d
 	return p.Mock.SendPayout(ctx, ref, email, amount, note)
 }
 
-// flakyStore is a memStore whose next Save can be made to fail.
+// flakyStore is a memStore whose next Save can be made to fail. Like
+// Postgres, it keeps deposits and payouts as they were when saved and
+// loads them as new objects.
 type flakyStore struct {
 	memStore
-	mu   sync.Mutex
-	fail bool
+	mu       sync.Mutex
+	fail     bool
+	deposits []domain.Deposit
+	payouts  []domain.Payout
 }
 
 func (f *flakyStore) Save(ctx context.Context, items []any) error {
@@ -39,13 +43,147 @@ func (f *flakyStore) Save(ctx context.Context, items []any) error {
 		f.fail = false
 		return errors.New("database went away")
 	}
-	return f.memStore.Save(ctx, items)
+	rest := []any{}
+	for _, it := range items {
+		switch v := it.(type) {
+		case *domain.Deposit:
+			f.deposits = upsert(f.deposits, *v, func(a, b domain.Deposit) bool { return a.OrderID == b.OrderID })
+		case *domain.Payout:
+			f.payouts = upsert(f.payouts, *v, func(a, b domain.Payout) bool { return a.ID == b.ID })
+		default:
+			rest = append(rest, it)
+		}
+	}
+	return f.memStore.Save(ctx, rest)
+}
+
+func upsert[T any](list []T, v T, same func(a, b T) bool) []T {
+	for i := range list {
+		if same(list[i], v) {
+			list[i] = v
+			return list
+		}
+	}
+	return append(list, v)
 }
 
 func (f *flakyStore) Load(ctx context.Context) (*Snapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.memStore.Load(ctx)
+	snap, err := f.memStore.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range f.deposits {
+		d := d
+		snap.Deposits = append(snap.Deposits, &d)
+	}
+	for _, p := range f.payouts {
+		p := p
+		snap.Payouts = append(snap.Payouts, &p)
+	}
+	return snap, nil
+}
+
+func (f *flakyStore) failNextSave() {
+	f.mu.Lock()
+	f.fail = true
+	f.mu.Unlock()
+}
+
+// blockingPayPal blocks CaptureOrder and PayoutStatus until released.
+type blockingPayPal struct {
+	*paypal.Mock
+	block            bool
+	entered, release chan struct{}
+}
+
+func (p *blockingPayPal) wait() {
+	if p.block {
+		p.entered <- struct{}{}
+		<-p.release
+	}
+}
+
+func (p *blockingPayPal) CaptureOrder(ctx context.Context, orderID string) error {
+	p.wait()
+	return p.Mock.CaptureOrder(ctx, orderID)
+}
+
+func (p *blockingPayPal) PayoutStatus(ctx context.Context, batchID string) (string, error) {
+	p.wait()
+	return p.Mock.PayoutStatus(ctx, batchID)
+}
+
+func newFlakyService(t *testing.T) (*Service, *flakyStore, *blockingPayPal) {
+	t.Helper()
+	st := &flakyStore{}
+	pp := &blockingPayPal{Mock: &paypal.Mock{}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return s, st, pp
+}
+
+// A failed save in the middle of a capture reloads the deposit as a new
+// object. The capture must still credit exactly once, however often the
+// app then retries.
+func TestCaptureDuringReloadCreditsOnce(t *testing.T) {
+	s, st, pp := newFlakyService(t)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(500)))
+	pp.block = true
+	done := make(chan error)
+	go func() { _, err := s.CaptureDeposit(ctx, d.OrderID); done <- err }()
+	<-pp.entered
+	st.failNextSave()
+	_ = s.MarkAlertsSeen(a) // fails and reloads everything
+	pp.block = false
+	// The app retries while the first capture is still waiting on PayPal.
+	_, _ = s.CaptureDeposit(ctx, d.OrderID)
+	close(pp.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.CaptureDeposit(ctx, d.OrderID)
+	if b := balance(s, a); b != domain.Rupees(500) {
+		t.Fatalf("balance %d after one ₹500 top-up", b)
+	}
+	if got := must[*domain.Deposit](t)(s.Deposit(d.OrderID, a)); got.Status != "captured" {
+		t.Fatalf("deposit is %s", got.Status)
+	}
+	checkBooks(t, s)
+}
+
+// The same for a payout PayPal sends back: it is given back once.
+func TestReturnedPayoutDuringReloadIsGivenBackOnce(t *testing.T) {
+	s, st, pp := newFlakyService(t)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(1000)))
+	must[*domain.Deposit](t)(s.CaptureDeposit(ctx, d.OrderID))
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	pp.PayoutFirst = "PENDING"
+	must[*domain.Payout](t)(s.Withdraw(ctx, a, domain.Rupees(400)))
+	pp.PayoutLater = "RETURNED"
+	pp.block = true
+	done := make(chan struct{})
+	go func() { s.RefreshPayouts(ctx, a); close(done) }()
+	<-pp.entered
+	st.failNextSave()
+	_ = s.MarkAlertsSeen(a)
+	pp.block = false
+	close(pp.release)
+	<-done
+	s.RefreshPayouts(ctx, a)
+	s.RefreshPayouts(ctx, a)
+	if b := balance(s, a); b != domain.Rupees(1000) {
+		t.Fatalf("balance %d: the ₹400 should come back once", b)
+	}
+	checkBooks(t, s)
 }
 
 // Many withdrawals of the whole balance at once: only one may go through,

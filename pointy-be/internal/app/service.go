@@ -474,6 +474,22 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A failed save elsewhere may have reloaded the state while PayPal was
+	// called: carry on with the deposit as it is now.
+	if cur, ok := s.deposits[orderID]; ok {
+		d = cur
+	}
+	// The ledger is the record: never credit the same order twice.
+	if s.ledgerHasRefL(orderID, "topup", "deposit") {
+		if d.Status != "captured" {
+			d.Status = "captured"
+			s.track(d)
+			if err := s.commitL(); err != nil {
+				return nil, err
+			}
+		}
+		return d, nil
+	}
 	if perr != nil {
 		d.Status = "created"
 		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", map[string]any{"paypal": perr.Error()})
@@ -505,6 +521,17 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		return nil, err
 	}
 	return d, nil
+}
+
+// ledgerHasRefL says whether an entry of one of these kinds was already
+// posted for ref (a PayPal order or payout id).
+func (s *Service) ledgerHasRefL(ref string, kinds ...string) bool {
+	for _, e := range s.ledger.Entries() {
+		if e.Ref == ref && contains(kinds, e.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 // DepositFromBalance moves money from the person's balance into their trip
