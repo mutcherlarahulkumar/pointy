@@ -66,7 +66,7 @@ func (s *Service) SetBudgets(tripID, userID string, in map[domain.Category]Paise
 	t, err := s.openTripL(tripID, userID)
 	if err == nil {
 		for c, v := range in {
-			if !domain.ValidCategory(c) || v < 0 {
+			if !domain.ValidCategory(c) || v < 0 || v > MaxBudget {
 				err = domain.Invalid("bad budget for %q", c)
 			}
 		}
