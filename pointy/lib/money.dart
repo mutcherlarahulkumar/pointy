@@ -41,7 +41,9 @@ String groupIndian(int n) {
 int? parseToPaise(String input) {
   final cleaned = input.replaceAll(RegExp(r'[₹,\s]'), '');
   final match = RegExp(r'^(\d+)(?:\.(\d{0,2}))?$').firstMatch(cleaned);
-  if (match == null) return null;
+  // At most 12 digits of rupees: longer is a typo, and 20 digits would not
+  // even fit in an int (int.parse throws while the field is being built).
+  if (match == null || match.group(1)!.replaceFirst(RegExp(r'^0+'), '').length > 12) return null;
   final rupees = int.parse(match.group(1)!);
   final fraction = (match.group(2) ?? '').padRight(2, '0');
   final paise = rupees * 100 + int.parse(fraction);

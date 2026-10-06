@@ -25,6 +25,15 @@ void main() {
     expect(parseToPaise(''), isNull);
   });
 
+  test('absurdly long numbers are refused, not a crash or a wrapped-around amount', () {
+    expect(parseToPaise('99999999999999999999'), isNull); // more digits than an int holds
+    expect(parseToPaise('999999999999999999'), isNull); // fits an int, but ×100 wraps negative
+    expect(parseToPaise('1234567890123'), isNull);
+    expect(parseToPaise('100000000000'), 10000000000000); // ₹1 lakh crore still reads
+    expect(parseToPaise('007'), 700);
+    expect(parseToPaise('-5'), isNull);
+  });
+
   test('splits like the backend: leftover paise go to the first people', () {
     expect(splitPaise(1000, [1, 1, 1]), [334, 333, 333]);
     expect(splitPaise(184000, [1, 1, 1, 1]), [46000, 46000, 46000, 46000]);
