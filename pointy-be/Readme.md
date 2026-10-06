@@ -11,7 +11,7 @@ Pointy is a **wallet**. PayPal is used only at its two edges, with a US sandbox 
 
 Everything in between is an instant entry in Pointy's double-entry ledger, with no PayPal call: paying a Pointy user, requests, split bills, moving money into a trip, the trip paying a Pointy user (`mode: member`) or paying you back (`mode: reimburse`), and settle-up into balances. Balances are always derived from the ledger, never stored.
 
-A withdrawal holds the money first, calls PayPal, and posts only if PayPal accepts it; if PayPal refuses, nothing changes. If it later comes back (unclaimed and returned, failed, blocked) the entry is reversed and the money is back in the balance. `GET /api/money` checks that the money at PayPal equals what Pointy owes everyone.
+A withdrawal is saved as `sending` (which holds the money, also across restarts) before PayPal is called, and posts only if PayPal accepts it; if PayPal refuses, nothing changes. If it later comes back (unclaimed and returned, failed, blocked) the entry is reversed and the money is back in the balance. `GET /api/money` checks that the money at PayPal equals what Pointy owes everyone.
 
 ## Run it
 
