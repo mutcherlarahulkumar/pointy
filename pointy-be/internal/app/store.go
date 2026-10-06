@@ -20,7 +20,8 @@ type Store interface {
 	// domain.Session, domain.SessionEnd, *domain.Trip, domain.Entry,
 	// *domain.Deposit, *domain.Expense, *domain.DepositRequest,
 	// *domain.Plan, *domain.Alert, *domain.MoneyRequest, *domain.Payout,
-	// *domain.GroupBuy, *domain.FamilyLink and *domain.Approval.
+	// *domain.GroupBuy, *domain.FamilyLink, *domain.Approval,
+	// *domain.ChatMessage and domain.ChatCleared.
 	Save(ctx context.Context, items []any) error
 }
 

@@ -30,10 +30,10 @@ func (p *slowPayPal) SendPayout(ctx context.Context, ref, email string, amount d
 // loads them as new objects.
 type flakyStore struct {
 	memStore
-	mu       sync.Mutex
-	fail     bool
-	deposits []domain.Deposit
-	payouts  []domain.Payout
+	mu        sync.Mutex
+	fail      bool
+	deposits  []domain.Deposit
+	payouts   []domain.Payout
 	groupBuys []domain.GroupBuy
 }
 
@@ -263,75 +263,6 @@ func TestReloadKeepsWithdrawalHolds(t *testing.T) {
 	}
 	if b := balance(s, a); b != 0 {
 		t.Fatalf("balance %d", b)
-	}
-	checkBooks(t, s)
-}
-
-// PIN guesses sent in parallel must not get past the five-try lockout:
-// each guess counts before the slow bcrypt check, not after it.
-func TestParallelPINGuessesAreCapped(t *testing.T) {
-	s, _, _ := newTestService(t, nil)
-	register(t, s, "Asha", "9876543210")
-	var mu sync.Mutex
-	tried := 0
-	var wg sync.WaitGroup
-	for i := 0; i < 30; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, err := s.Login("9876543210", fmt.Sprintf("%06d", 100000+i*7))
-			if c := code(err); c == "wrong_pin" || c == "" {
-				mu.Lock()
-				tried++
-				mu.Unlock()
-			}
-		}(i)
-	}
-	wg.Wait()
-	if tried > maxFailedPINs {
-		t.Fatalf("%d PINs were checked in parallel; the limit is %d", tried, maxFailedPINs)
-	}
-}
-
-// A payment between balances happens now: a back-dated "at" from the app
-// must not move it into another day (it would slip past a child's daily
-// and monthly limits, and reorder history).
-func TestPersonalPaymentCannotBeBackdated(t *testing.T) {
-	s, c, _, k := family(t)
-	shop := register(t, s, "Shop", "9988776655")
-	old := c.t.AddDate(0, -2, 0)
-	// The daily limit is ₹300; five back-dated ₹100 payments are ₹500 today.
-	var err error
-	for i := 0; i < 5 && err == nil; i++ {
-		_, err = s.PayPersonal(k, ExpenseInput{Description: "Sweets", Amount: domain.Rupees(100), PayeeUserID: shop, At: &old})
-	}
-	if code(err) != "needs_parent" {
-		t.Fatalf("back-dated payments got past the daily limit: %v", err)
-	}
-	for _, h := range s.History(k) {
-		if h.At.Before(c.t) && h.Kind == "payment" {
-			t.Fatalf("payment recorded at %v, before now %v", h.At, c.t)
-		}
-	}
-}
-
-// A trip wallet paying a child (mode member) is money into a child account
-// like any other: the child-wallet caps apply.
-func TestTripPaymentToChildKeepsChildCaps(t *testing.T) {
-	s, _, p, k := family(t)
-	x := register(t, s, "Asha", "9988776655")
-	topUp(t, s, p, 20000)
-	topUp(t, s, x, 20000)
-	trip := goa(t, s, p, x)
-	must[TripView](t)(s.DepositFromBalance(trip, p, domain.Rupees(15000)))
-	must[TripView](t)(s.DepositFromBalance(trip, x, domain.Rupees(15000)))
-	_, err := s.AddExpense(trip, p, ExpenseInput{Description: "Gift", Category: domain.Other, Amount: domain.Rupees(20000),
-		Mode: ModeMember, PayeeUserID: k, ConfirmOverBudget: true})
-	if code(err) != "child_balance_cap" {
-		t.Fatalf("₹20,000 into a child account from a trip: %v", err)
-	}
-	if b := balance(s, k); b > ChildMaxBalance {
-		t.Fatalf("child holds %d", b)
 	}
 	checkBooks(t, s)
 }

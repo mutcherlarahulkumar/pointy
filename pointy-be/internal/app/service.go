@@ -15,7 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -109,10 +109,6 @@ func (s *Service) postL(e domain.Entry) error {
 	}
 	s.track(e)
 	return nil
-}
-
-func rail(err error) *domain.Error {
-	return &domain.Error{Status: http.StatusBadGateway, Code: "paypal_error", Message: err.Error()}
 }
 
 func (s *Service) tripL(tripID, userID string) (*domain.Trip, error) {
@@ -455,7 +451,7 @@ func (s *Service) startOrder(ctx context.Context, tripID, userID string, amount 
 	id := s.idL("dep")
 	o, perr := s.pp.CreateOrder(ctx, id, amount, what)
 	if perr != nil {
-		return nil, rail(perr)
+		return nil, paypalErr(perr)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -534,7 +530,8 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 	}
 	if perr != nil {
 		d.Status = "created"
-		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", map[string]any{"paypal": perr.Error()})
+		log.Printf("capture %s: %v", orderID, perr)
+		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", nil)
 	}
 	var err error
 	if d.TripID == "" {

@@ -48,14 +48,9 @@ func (s *Service) ChatHistory(userID string) []*domain.ChatMessage {
 func (s *Service) ClearChat(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	old := s.chats[userID]
 	delete(s.chats, userID)
 	s.track(domain.ChatCleared{UserID: userID})
-	if err := s.commitL(); err != nil {
-		s.chats[userID] = old
-		return err
-	}
-	return nil
+	return s.commitL() // on failure commitL puts the state back
 }
 
 // Chat answers one message and saves both lines. The model answers when one
@@ -252,7 +247,7 @@ func (s *Service) chatAction(userID string, contacts []domain.PublicUser, r ai.C
 }
 
 func payAction(kind string, p *domain.PublicUser, amount Paise, note string) *domain.ChatAction {
-	first := strings.Fields(p.Name)[0]
+	first := firstName(p.Name)
 	a := &domain.ChatAction{Type: kind, Person: p, Amount: amount, Note: note}
 	switch {
 	case kind == "request" && amount > 0:

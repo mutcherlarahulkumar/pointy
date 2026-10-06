@@ -64,7 +64,7 @@ func (s *Service) CheckPhone(raw string) (PhoneCheck, error) {
 	defer s.mu.Unlock()
 	out := PhoneCheck{Phone: phone}
 	if id, ok := s.phones[phone]; ok {
-		out.Exists, out.FirstName = true, strings.Fields(s.users[id].Name + " ")[0]
+		out.Exists, out.FirstName = true, firstName(s.users[id].Name)
 	}
 	return out, nil
 }
@@ -103,10 +103,8 @@ func (s *Service) Register(in RegisterInput) (AuthResult, error) {
 	s.users[u.ID], s.phones[phone] = u, u.ID
 	s.track(u)
 	token := s.newSessionL(u.ID)
-	s.alertL("", u.ID, "money", "Welcome to Pointy, "+strings.Fields(name)[0], "Add money with PayPal to start paying friends")
-	if err := s.commitL(); err != nil {
-		delete(s.users, u.ID)
-		delete(s.phones, phone)
+	s.alertL("", u.ID, "money", "Welcome to Pointy, "+firstName(name), "Add money with PayPal to start paying friends")
+	if err := s.commitL(); err != nil { // commitL put the state back
 		return AuthResult{}, err
 	}
 	return AuthResult{Token: token, User: u}, nil
@@ -232,4 +230,12 @@ func weakPIN(p string) bool {
 		down = down && d == -1
 	}
 	return same || up || down
+}
+
+// firstName is the first word of a name, or "" for an empty one.
+func firstName(name string) string {
+	if f := strings.Fields(name); len(f) > 0 {
+		return f[0]
+	}
+	return ""
 }

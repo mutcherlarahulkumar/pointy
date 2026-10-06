@@ -41,11 +41,9 @@ func (s *Service) SetPayPalEmail(userID, email string) (Me, error) {
 		s.mu.Unlock()
 		return Me{}, domain.NotFound("user")
 	}
-	old := u.PayPalEmail
 	u.PayPalEmail = strings.TrimSpace(email)
 	s.track(u)
-	if err := s.commitL(); err != nil {
-		u.PayPalEmail = old
+	if err := s.commitL(); err != nil { // commitL put the state back
 		s.mu.Unlock()
 		return Me{}, err
 	}

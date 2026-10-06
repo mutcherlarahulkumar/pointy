@@ -134,7 +134,7 @@ func matchContacts(contacts []domain.PublicUser, name string) []domain.PublicUse
 		switch {
 		case n == name:
 			full = append(full, c)
-		case strings.Fields(n)[0] == name:
+		case firstName(n) == name:
 			first = append(first, c)
 		}
 	}
@@ -171,7 +171,7 @@ func (s *Service) quickPayRules(userID, text string, contacts []domain.PublicUse
 			n := strings.ToLower(strings.Join(strings.Fields(c.Name), " "))
 			if strings.Contains(lower, " "+n+" ") {
 				full = append(full, c)
-			} else if strings.Contains(lower, " "+strings.Fields(n)[0]+" ") {
+			} else if strings.Contains(lower, " "+firstName(n)+" ") {
 				first = append(first, c)
 			}
 		}
@@ -220,9 +220,9 @@ func quickPayReply(q QuickPayResult) string {
 		}
 		return "Who should I pay? Use a name from your people or a mobile number."
 	case q.Amount <= 0:
-		return fmt.Sprintf("How much for %s?", strings.Fields(q.Person.Name)[0])
+		return fmt.Sprintf("How much for %s?", firstName(q.Person.Name))
 	}
-	first := strings.Fields(q.Person.Name)[0]
+	first := firstName(q.Person.Name)
 	what := ""
 	if q.Note != "" {
 		what = " for " + q.Note

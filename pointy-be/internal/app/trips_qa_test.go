@@ -14,7 +14,7 @@ import (
 // Joining after the 48 hours are up must not buy anything, even when
 // nobody listed the purchases in between (expiry used to happen only on a
 // list).
-func TestQAJoinAfterDeadlineDoesNotBuy(t *testing.T) {
+func TestJoinAfterDeadlineDoesNotBuy(t *testing.T) {
 	s, trip, a, d, c := groupTrip(t, nil)
 	ctx := context.Background()
 	g := propose(t, s, trip, a, "first aid kit")
@@ -33,7 +33,7 @@ func TestQAJoinAfterDeadlineDoesNotBuy(t *testing.T) {
 }
 
 // A wallet hold of an expired purchase must not block spending or settling.
-func TestQAExpiredHoldDoesNotBlockSettle(t *testing.T) {
+func TestExpiredHoldDoesNotBlockSettle(t *testing.T) {
 	s, trip, a, _, c := groupTrip(t, nil)
 	ctx := context.Background()
 	g := propose(t, s, trip, a, "first aid kit")
@@ -47,7 +47,7 @@ func TestQAExpiredHoldDoesNotBlockSettle(t *testing.T) {
 }
 
 // A PayPal approval that arrives after the deadline is voided, not counted.
-func TestQAAuthorizeAfterDeadlineIsVoided(t *testing.T) {
+func TestAuthorizeAfterDeadlineIsVoided(t *testing.T) {
 	s, pp, c := newTestService(t, nil)
 	s.SetShopper(shop.Demo{})
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func TestQAAuthorizeAfterDeadlineIsVoided(t *testing.T) {
 
 // Huge share weights or exact amounts must be refused as invalid, never
 // wrap around int64 into negative or oversized shares.
-func TestQASplitRefusesOverflow(t *testing.T) {
+func TestSplitRefusesOverflow(t *testing.T) {
 	big := int64(1) << 62
 	cases := []struct {
 		method domain.SplitMethod
@@ -96,7 +96,7 @@ func TestQASplitRefusesOverflow(t *testing.T) {
 
 // A budget so large that budget maths wraps around int64 is refused, both
 // when planning a trip and when changing budgets later.
-func TestQAHugeBudgetIsRefused(t *testing.T) {
+func TestHugeBudgetIsRefused(t *testing.T) {
 	s, _, _ := newTestService(t, nil)
 	a := register(t, s, "Asha", "9876543210")
 	trip := goa(t, s, a)
@@ -113,7 +113,7 @@ func TestQAHugeBudgetIsRefused(t *testing.T) {
 
 // Joins, a no, and listing all at once: whatever wins, the purchase is
 // paid at most once, the books balance and no share goes below zero.
-func TestQAConcurrentJoinsDeclineAndExpire(t *testing.T) {
+func TestConcurrentJoinsDeclineAndExpire(t *testing.T) {
 	for round := 0; round < 8; round++ {
 		s, pp, c := newTestService(t, nil)
 		s.SetShopper(shop.Demo{})
@@ -216,7 +216,7 @@ func (p ctxPP) VoidAuthorization(ctx context.Context, authID string) error {
 // cancelled) before PayPal answers: everyone agreed, so the purchase must
 // still be paid, not fail half way because of the dropped connection.
 // Likewise a no from a phone that hangs up still lets the PayPal holds go.
-func TestQAHangingUpDoesNotBreakPayingOrVoiding(t *testing.T) {
+func TestHangingUpDoesNotBreakPayingOrVoiding(t *testing.T) {
 	mock := &paypal.Mock{}
 	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
 	s := New(ctxPP{mock}, c.now, nil)
@@ -259,7 +259,7 @@ func (h *hookPP) CreateAuthOrder(ctx context.Context, ref string, amount domain.
 // Saying yes from the trip share while the PayPal page is being made must
 // keep the wallet hold: the late PayPal order must not turn the share
 // into an unauthorized PayPal one.
-func TestQAPayPalJoinRacingWalletJoinKeepsTheWalletHold(t *testing.T) {
+func TestPayPalJoinRacingWalletJoinKeepsTheWalletHold(t *testing.T) {
 	pp := &hookPP{Mock: &paypal.Mock{}}
 	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
 	s := New(pp, c.now, nil)
@@ -290,7 +290,7 @@ func TestQAPayPalJoinRacingWalletJoinKeepsTheWalletHold(t *testing.T) {
 
 // A person who approves on PayPal while also saying yes from their trip
 // share pays once, and the PayPal hold that was not used is let go.
-func TestQAAuthorizeRacingWalletJoinVoidsTheSpareHold(t *testing.T) {
+func TestAuthorizeRacingWalletJoinVoidsTheSpareHold(t *testing.T) {
 	pp := &hookPP{Mock: &paypal.Mock{}}
 	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
 	s := New(pp, c.now, nil)
