@@ -24,7 +24,7 @@ class WithdrawScreen extends StatefulWidget {
 class _WithdrawScreenState extends State<WithdrawScreen> {
   late Future<Me> _me = api.me();
   final _amount = TextEditingController();
-  String _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   @override
@@ -42,7 +42,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     if (!await confirmPayment(context, 'Withdraw ${formatPaise(paise)} to ${me.paypalEmail}')) return;
     setState(() => _busy = true);
     try {
-      final p = await api.withdraw(paise, key: _key);
+      final p = await api.withdraw(paise, key: _key.forRequest(paise));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => SuccessScreen(
@@ -59,7 +59,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         ),
       ));
     } catch (e) {
-      _key = newIdempotencyKey();
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);

@@ -500,7 +500,7 @@ class _ReviewScreen extends StatefulWidget {
 }
 
 class _ReviewScreenState extends State<_ReviewScreen> {
-  String _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   Future<void> _pay({bool confirmOverBudget = false}) async {
@@ -510,7 +510,9 @@ class _ReviewScreenState extends State<_ReviewScreen> {
     setState(() => _busy = true);
     try {
       final loc = await coarseLocation();
-      final e = await api.addExpense(d.trip.id, d.toJson(confirmOverBudget: confirmOverBudget, lat: loc?.lat, lng: loc?.lng), key: _key);
+      final e = await api.addExpense(d.trip.id, d.toJson(confirmOverBudget: confirmOverBudget, lat: loc?.lat, lng: loc?.lng),
+          // Not the location: it can differ between a try and its retry.
+          key: _key.forRequest(d.toJson(confirmOverBudget: confirmOverBudget)));
       if (!mounted) return;
       final nav = Navigator.of(context);
       // Back to the trip, with the receipt on top.
@@ -533,7 +535,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         ),
       ));
     } on ApiException catch (e) {
-      _key = newIdempotencyKey(); // the server stored this answer under the old key
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       if (e.code == 'budget_warning' && e.details != null) {

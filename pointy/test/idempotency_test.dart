@@ -9,6 +9,8 @@ import 'package:pointy/models.dart';
 import 'package:pointy/payment_lock.dart';
 import 'package:pointy/screens/assistant/request_view.dart';
 import 'package:pointy/screens/money/bill_split.dart';
+import 'package:pointy/screens/money/pay_flow.dart';
+import 'package:pointy/screens/money/withdraw.dart';
 import 'package:pointy/screens/money/request_flow.dart';
 import 'package:pointy/screens/money/split_flow.dart';
 import 'package:pointy/theme.dart';
@@ -218,5 +220,71 @@ void main() {
     final k = keys('/api/requests/req_1/pay');
     expect(k, hasLength(2));
     expect(k[1], isNot(k[0]), reason: 'the same key only replays the stored 409');
+  });
+
+  Future<void> typePin(WidgetTester tester) async {
+    for (final d in '246810'.split('')) {
+      await tester.tap(find.text(d).last);
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+  }
+
+  // A server that answers [routes] (and the fixtures) but whose connection
+  // drops on [path], after the payment may already have gone through.
+  ApiClient dropping(String path, Map<String, (int, String)> routes) {
+    final ok = fakeApi(overrides: routes);
+    final c = MockClient((req) async {
+      sent.add(req);
+      if (req.url.path == path) throw http.ClientException('connection reset');
+      final hit = routes['${req.method} ${req.url.path}'] ?? (200, fixture('me'));
+      return http.Response.bytes(utf8.encode(hit.$2), hit.$1, headers: {'content-type': 'application/json'});
+    });
+    return ApiClient(baseUrl: ok.baseUrl, client: c)
+      ..token = 't'
+      ..userId = _me;
+  }
+
+  testWidgets('pay: a retry after the connection dropped reuses the key, so it cannot pay twice', (tester) async {
+    phone(tester);
+    PaymentLock.instance = FakeLock();
+    addTearDown(() => PaymentLock.instance = PaymentLock());
+    final routes = {'POST /api/auth/verify-pin': (200, '{"ok":true}')};
+    api = dropping('/api/payments/personal', routes);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: PayConfirmScreen(person: Person(id: _dev, name: 'Dev Mehta', phone: '9123456780'), amountPaise: 20000, note: 'Chai'),
+    ));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.text('Pay ₹200'));
+      await tester.pumpAndSettle();
+      await typePin(tester);
+      await dismissSnack(tester);
+    }
+    final k = keys('/api/payments/personal');
+    expect(k, hasLength(2));
+    expect(k[1], k[0]);
+  });
+
+  testWidgets('withdraw: a retry after the connection dropped reuses the key', (tester) async {
+    phone(tester);
+    PaymentLock.instance = FakeLock();
+    addTearDown(() => PaymentLock.instance = PaymentLock());
+    final me = fixture('me').replaceFirst('"name":"Asha Rao"', '"name":"Asha Rao","paypal_email":"asha@example.com"');
+    api = dropping('/api/withdrawals', {'GET /api/me': (200, me), 'POST /api/auth/verify-pin': (200, '{"ok":true}')});
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const WithdrawScreen()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '500');
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.text('Withdraw ₹500'));
+      await tester.pumpAndSettle();
+      await typePin(tester);
+      await dismissSnack(tester);
+    }
+    final k = keys('/api/withdrawals');
+    expect(k, hasLength(2));
+    expect(k[1], k[0]);
   });
 }
