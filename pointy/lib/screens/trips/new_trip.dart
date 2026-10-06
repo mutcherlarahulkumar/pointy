@@ -191,7 +191,7 @@ class _MoneyStep extends StatefulWidget {
 class _MoneyStepState extends State<_MoneyStep> {
   final _deposit = TextEditingController();
   final _food = TextEditingController();
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   @override
@@ -207,7 +207,7 @@ class _MoneyStepState extends State<_MoneyStep> {
     p.foodPaise = parseToPaise(_food.text);
     setState(() => _busy = true);
     try {
-      final trip = await api.createTrip({
+      final body = {
         'name': p.name,
         'place': p.place,
         'start': toIsoIst(p.dates!.start),
@@ -215,7 +215,8 @@ class _MoneyStepState extends State<_MoneyStep> {
         'members': [for (final x in p.people) x.id],
         'deposit_target_paise': p.depositPaise,
         if (p.foodPaise != null) 'budgets_paise': {'food': p.foodPaise},
-      }, key: _key);
+      };
+      final trip = await api.createTrip(body, key: _key.forRequest(body));
       if (!mounted) return;
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
       nav.push(tripRoute(trip.id));
@@ -226,6 +227,7 @@ class _MoneyStepState extends State<_MoneyStep> {
         ));
       }
     } catch (e) {
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);

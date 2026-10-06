@@ -1,13 +1,20 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:pointy/api.dart';
+import 'package:pointy/models.dart';
+import 'package:pointy/payment_lock.dart';
+import 'package:pointy/screens/assistant/request_view.dart';
 import 'package:pointy/screens/money/bill_split.dart';
+import 'package:pointy/screens/money/request_flow.dart';
 import 'package:pointy/screens/money/split_flow.dart';
 import 'package:pointy/theme.dart';
 
 import 'fakes.dart';
+import 'payment_lock_test.dart' show FakeLock;
 
 const _me = 'u_c190dd4c22ea';
 const _dev = 'u_e30a147f6407';
@@ -156,5 +163,60 @@ void main() {
     expect(k, hasLength(2));
     expect(k[1], isNot(k[0]));
     expect(find.text('Sent 1 request'), findsOneWidget);
+  });
+
+  testWidgets('request money: a changed amount after an error sends a new Idempotency-Key', (tester) async {
+    phone(tester);
+    api = fakeApi(log: sent, overrides: {'POST /api/money-requests': (400, _conflict)})..userId = _me;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: RequestAmountScreen(person: Person(id: _dev, name: 'Dev Mehta', phone: '9123456780'), amountPaise: 50000),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ask for ₹500'));
+    await tester.pumpAndSettle();
+    await dismissSnack(tester);
+    await tester.enterText(find.byType(TextField).first, '400');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ask for ₹400'));
+    await tester.pumpAndSettle();
+    final k = keys('/api/money-requests');
+    expect(k, hasLength(2));
+    expect(k[1], isNot(k[0]));
+  });
+
+  testWidgets('a deposit request refused once (balance too low) can be paid after adding money', (tester) async {
+    phone(tester);
+    PaymentLock.instance = FakeLock();
+    addTearDown(() => PaymentLock.instance = PaymentLock());
+    const req = '{"id":"req_1","trip_id":"trip_7a6c1f73654c","user":{"id":"$_me","name":"Asha Rao"},"amount_paise":100000,'
+        '"due":"2026-10-10T00:00:00+05:30","status":"open"}';
+    api = fakeApi(log: sent, overrides: {
+      'GET /api/trips/trip_7a6c1f73654c/requests': (200, '[$req]'),
+      'POST /api/auth/verify-pin': (200, '{"ok":true}'),
+      'POST /api/requests/req_1/pay': (409, '{"error":{"code":"insufficient_balance","message":"not enough balance"}}'),
+    })..userId = _me;
+    final trip = (await api.trips()).first;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: RequestViewScreen(trip: trip, request: DepositRequest.fromJson(jsonDecode(req) as Map<String, dynamic>)),
+    ));
+    await tester.pumpAndSettle();
+    Future<void> payWithPin() async {
+      await tester.tap(find.textContaining('Pay from balance'));
+      await tester.pumpAndSettle();
+      for (final d in '246810'.split('')) {
+        await tester.tap(find.text(d).last);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+    }
+
+    await payWithPin();
+    await dismissSnack(tester);
+    await payWithPin();
+    final k = keys('/api/requests/req_1/pay');
+    expect(k, hasLength(2));
+    expect(k[1], isNot(k[0]), reason: 'the same key only replays the stored 409');
   });
 }
