@@ -9,6 +9,7 @@ import '../../tabs.dart';
 import '../../theme.dart';
 import '../../widgets/ai_mark.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/chat_bubble.dart';
 import '../../widgets/product_image.dart';
 import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
@@ -258,22 +259,12 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
 
   Widget _bubble(ChatMessage m) {
     final mine = m.mine;
-    final bubble = Container(
-      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: mine ? AppColors.pine700 : AppColors.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(18),
-          topRight: const Radius.circular(18),
-          bottomLeft: Radius.circular(mine ? 18 : 4),
-          bottomRight: Radius.circular(mine ? 4 : 18),
-        ),
-      ),
+    final bubble = ChatBubble(
+      mine: mine,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(m.text, style: AppText.body(color: mine ? Colors.white : AppColors.ink)),
+          Text(m.text, style: ChatBubble.textStyle(mine)),
           if (m.action != null && m.action!.type != 'shop') ...[
             const SizedBox(height: 10),
             _actionButton(m.action!),

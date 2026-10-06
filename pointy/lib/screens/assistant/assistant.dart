@@ -7,6 +7,7 @@ import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/ai_mark.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/chat_bubble.dart';
 import '../../widgets/tag.dart';
 
 /// The trip assistant. The organiser types an instruction, the assistant
@@ -187,20 +188,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Widget _bubble(_Message m) {
     return Align(
       alignment: m.fromMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        constraints: const BoxConstraints(maxWidth: 300),
-        decoration: BoxDecoration(
-          color: m.fromMe ? AppColors.pine700 : AppColors.surface,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(m.fromMe ? 18 : 4),
-            bottomRight: Radius.circular(m.fromMe ? 4 : 18),
-          ),
-        ),
-        child: Text(m.text!, style: AppText.body(color: m.fromMe ? Colors.white : AppColors.ink)),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ChatBubble(mine: m.fromMe, child: Text(m.text!, style: ChatBubble.textStyle(m.fromMe))),
       ),
     );
   }
