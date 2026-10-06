@@ -12,6 +12,7 @@ import 'screens/trips/trips.dart';
 import 'api.dart';
 import 'family_mode.dart';
 import 'look.dart';
+import 'prefs.dart';
 import 'screens/family/child_home.dart';
 import 'session.dart';
 import 'tabs.dart';
@@ -25,6 +26,7 @@ Future<void> main() async {
   GoogleFonts.config.allowRuntimeFetching = false;
   await Session.restore();
   await AppLook.restore();
+  await AiPrefs.restore();
   // A child account opens straight in the child version.
   if (Session.signedIn.value) {
     try {
