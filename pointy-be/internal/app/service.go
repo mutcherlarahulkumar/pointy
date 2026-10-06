@@ -13,6 +13,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -265,6 +266,15 @@ func (s *Service) HandleWebhook(ctx context.Context, eventType, resourceID strin
 		return err
 	}
 	return nil // other events are acknowledged and ignored
+}
+
+// Marshal turns a value the service returned into JSON while holding the
+// state lock. Returned views share objects with the live state, so they
+// must not be read while another request changes them.
+func (s *Service) Marshal(v any) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return json.Marshal(v)
 }
 
 // ---------------------------------------------------------------- trips

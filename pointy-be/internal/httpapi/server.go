@@ -94,7 +94,16 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 				if r.Method == http.MethodPost {
 					status = http.StatusCreated
 				}
-				writeJSON(w, status, v)
+				// Views point into live state: encode them under the
+				// service lock so a write cannot change them mid-way.
+				b, err := svc.Marshal(v)
+				if err != nil {
+					writeErr(w, err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(status)
+				_, _ = w.Write(b)
 			})
 		})
 	}
