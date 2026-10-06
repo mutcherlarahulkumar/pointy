@@ -118,3 +118,26 @@ func TestReloadKeepsWithdrawalHolds(t *testing.T) {
 	}
 	checkBooks(t, s)
 }
+
+// Item prices so big they wrap around int64 must be refused, not added up
+// into a small, wrong bill.
+func TestSplitByItemsRefusesHugeItems(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	huge := Paise(1 << 62)
+	_, err := s.SplitByItems(a, ItemSplitInput{Description: "Dinner", Items: []ItemShareLine{
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Chai", Amount: 500, People: []string{d}},
+		{Name: "Dosa", Amount: 100, People: []string{a}},
+	}})
+	if code(err) != "invalid" {
+		t.Fatalf("huge items: %v", err)
+	}
+	if len(s.MoneyRequests(d)) != 0 {
+		t.Fatal("a request was sent")
+	}
+}

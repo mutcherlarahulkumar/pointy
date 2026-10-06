@@ -328,6 +328,11 @@ func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResul
 		if name == "" || it.Amount <= 0 {
 			return ItemSplitResult{}, domain.Invalid("every item needs a name and a price")
 		}
+		// Each price within the limit keeps the sum of up to 100 of them
+		// far from overflowing.
+		if err := checkAmount(it.Amount); err != nil {
+			return ItemSplitResult{}, err
+		}
 		if len(it.People) == 0 {
 			return ItemSplitResult{}, domain.Invalid("choose who had %s", name)
 		}
