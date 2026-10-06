@@ -62,10 +62,6 @@ type Service struct {
 	groupBuys     []*domain.GroupBuy               // purchases a trip's agent found, bought together
 	familyLinks   []*domain.FamilyLink             // parent and child accounts
 	approvals     []*domain.Approval               // child payments waiting for a parent
-	// holds is money set aside while a PayPal payout is being sent, so it
-	// cannot be spent twice in the meantime. Never stored: a payout either
-	// finishes (and is posted) or is released.
-	holds map[string]Paise
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
@@ -92,7 +88,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
+		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{},
 	}
 }
 

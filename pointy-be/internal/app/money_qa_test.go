@@ -455,6 +455,47 @@ func TestParallelCapturesCreditOnce(t *testing.T) {
 	checkBooks(t, s)
 }
 
+// PayPal has paid a withdrawal out, but saving that fails (or the server
+// stops) before it is written down. The money has left: it must not be
+// spendable again, now or after a restart.
+func TestPayoutSentButNotSavedStaysHeld(t *testing.T) {
+	st := &flakyStore{}
+	pp := &slowPayPal{Mock: &paypal.Mock{}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 1000)
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	done := make(chan error)
+	go func() {
+		_, err := s.Withdraw(context.Background(), a, domain.Rupees(1000))
+		done <- err
+	}()
+	<-pp.entered
+	st.failNextSave()
+	close(pp.release)
+	if err := <-done; code(err) != "storage_error" {
+		t.Fatalf("withdraw: %v", err)
+	}
+	if len(pp.Payouts) != 1 {
+		t.Fatal("PayPal should have paid")
+	}
+	if _, err := s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(1000), PayeeUserID: d}); code(err) != "insufficient_balance" {
+		t.Fatalf("money PayPal already paid out was spent again: %v", err)
+	}
+	s2 := New(pp, c.now, st)
+	if err := s2.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.Withdraw(context.Background(), a, domain.Rupees(1000)); code(err) != "insufficient_balance" {
+		t.Fatalf("after a restart the same money could be withdrawn again: %v", err)
+	}
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {

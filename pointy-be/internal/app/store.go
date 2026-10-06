@@ -123,11 +123,6 @@ func (s *Service) loadL(ctx context.Context) error {
 	s.groupBuys = snap.GroupBuys
 	s.familyLinks = snap.FamilyLinks
 	s.approvals = snap.Approvals
-	// Holds are never stored: they belong to withdrawals still waiting for
-	// PayPal in this process, so a reload after a failed save keeps them.
-	if s.holds == nil {
-		s.holds = map[string]Paise{}
-	}
 	s.chats = map[string][]*domain.ChatMessage{}
 	for _, m := range snap.Chats {
 		s.chats[m.UserID] = append(s.chats[m.UserID], m)
