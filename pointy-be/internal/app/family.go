@@ -301,20 +301,26 @@ type FamilyView struct {
 func (s *Service) childViewL(l *domain.FamilyLink) ChildView {
 	now := s.now()
 	v := ChildView{LinkID: l.ID, Status: l.Status, Child: s.users[l.ChildID].Public(), Parent: s.users[l.ParentID].Public(), BirthDate: l.BirthDate,
-		Balance: s.ledger.Owed(domain.PersonalAccount(l.ChildID)), DailyLimit: l.DailyLimit, MonthlyLimit: l.MonthlyLimit,
-		SpentToday: s.spentByL(l.ChildID, dayStart(now)), SpentMonth: s.spentByL(l.ChildID, monthStart(now)), MaxPayment: ChildMaxPayment,
+		DailyLimit: l.DailyLimit, MonthlyLimit: l.MonthlyLimit, MaxPayment: ChildMaxPayment,
 		TermsVersion: l.TermsVersion, ConsentAt: l.ParentConsentAt, AcceptedAt: l.ChildAcceptedAt}
 	v.Age, _ = ageOn(l.BirthDate, now)
+	if l.Status == "invited" {
+		exp := l.CodeExpires
+		v.CodeExpires = &exp
+	}
+	if l.Status != "active" {
+		// Anyone can invite any number: until the child says yes, the
+		// inviter sees nothing of the account (DPDP Act s.9(1)).
+		return v
+	}
+	v.Balance = s.ledger.Owed(domain.PersonalAccount(l.ChildID))
+	v.SpentToday, v.SpentMonth = s.spentByL(l.ChildID, dayStart(now)), s.spentByL(l.ChildID, monthStart(now))
 	v.DailyLeft, v.MonthlyLeft = max(0, l.DailyLimit-v.SpentToday), max(0, l.MonthlyLimit-v.SpentMonth)
 	v.ReceivedLeft = max(0, min(ChildMaxMonthIn-s.receivedByL(l.ChildID, monthStart(now)), ChildMaxBalance-v.Balance))
 	for _, a := range s.approvals {
 		if a.LinkID == l.ID && a.Status == "pending" {
 			v.Pending++
 		}
-	}
-	if l.Status == "invited" {
-		exp := l.CodeExpires
-		v.CodeExpires = &exp
 	}
 	return v
 }
@@ -466,9 +472,8 @@ func (s *Service) InviteChild(parentID string, in InviteInput) (Invite, error) {
 	case s.isParentL(childID):
 		return Invite{}, domain.Conflict("is_parent", s.name(childID)+" looks after a child account, so cannot be one", nil)
 	}
-	if err := s.childFitsL(childID); err != nil {
-		return Invite{}, err
-	}
+	// childFitsL (balance, trips, withdrawals) runs when the child accepts:
+	// telling the inviter would show them the account.
 	// A new invite replaces this parent's earlier one for the same child.
 	for _, l := range s.familyLinks {
 		if l.ParentID == parentID && l.ChildID == childID && l.Status == "invited" {

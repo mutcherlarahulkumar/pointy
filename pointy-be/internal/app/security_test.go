@@ -134,17 +134,42 @@ func TestNoLinkWhileAWithdrawalCanComeBack(t *testing.T) {
 	must[Me](t)(s.SetPayPalEmail(k, "nobody@example.com"))
 	pp.PayoutFirst, pp.PayoutLater = "UNCLAIMED", "RETURNED"
 	must[*domain.Payout](t)(s.Withdraw(ctx, k, domain.Rupees(45000)))
-	if _, err := s.InviteChild(p, InviteInput{ChildPhone: "9123456780", BirthDate: "2012-05-03", DailyLimit: domain.Rupees(300),
-		MonthlyLimit: domain.Rupees(3000), AcceptTerms: FamilyTermsVersion, PIN: pin}); code(err) != "child_payout_open" {
+	inv := invite(t, s, p, "9123456780", "2012-05-03")
+	if _, err := s.AcceptInvite(k, inv.Child.LinkID, inv.Code, pin); code(err) != "child_payout_open" {
 		t.Fatalf("linked with a withdrawal on its way: %v", err)
 	}
 	s.RefreshPayouts(ctx, k) // PayPal sends it back
 	if b := balance(s, k); b != domain.Rupees(50000) {
 		t.Fatalf("balance %d", b)
 	}
-	if _, err := s.InviteChild(p, InviteInput{ChildPhone: "9123456780", BirthDate: "2012-05-03", DailyLimit: domain.Rupees(300),
-		MonthlyLimit: domain.Rupees(3000), AcceptTerms: FamilyTermsVersion, PIN: pin}); code(err) != "child_balance_cap" {
+	if _, err := s.AcceptInvite(k, inv.Child.LinkID, inv.Code, pin); code(err) != "child_balance_cap" {
 		t.Fatalf("back over the cap: %v", err)
+	}
+}
+
+// Anyone can invite any number, so an invite the child has not accepted
+// must not show the inviter the account's money, spending or trips.
+func TestInviteShowsNothingBeforeConsent(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	x := register(t, s, "Stranger", "9988776655")
+	v := register(t, s, "Victim", "9123456780")
+	shop := register(t, s, "Shop", "9811111111")
+	topUp(t, s, v, 5000)
+	must[*domain.Expense](t)(s.PayPersonal(v, ExpenseInput{Description: "Lunch", Amount: domain.Rupees(700), PayeeUserID: shop}))
+	inv := invite(t, s, x, "9123456780", "2012-05-03")
+	if c := inv.Child; c.Balance != 0 || c.SpentToday != 0 || c.SpentMonth != 0 || c.ReceivedLeft != 0 {
+		t.Fatalf("the invite shows the account: %+v", c)
+	}
+	if c := must[FamilyView](t)(s.Family(x)).Children[0]; c.Balance != 0 || c.SpentToday != 0 || c.SpentMonth != 0 {
+		t.Fatalf("the parent's screen shows the account: %+v", c)
+	}
+	// A rich account, or one in a trip, gets an invite all the same: the
+	// inviter learns nothing until the child says yes.
+	topUp(t, s, v, 20000)
+	goa(t, s, shop, v)
+	if _, err := s.InviteChild(x, InviteInput{ChildPhone: "9123456780", BirthDate: "2012-05-03", DailyLimit: domain.Rupees(300),
+		MonthlyLimit: domain.Rupees(3000), AcceptTerms: FamilyTermsVersion, PIN: pin}); err != nil {
+		t.Fatalf("the invite told the inviter about the account: %v", err)
 	}
 }
 
