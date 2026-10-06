@@ -255,6 +255,12 @@ func (s *Service) currentTripL(userID string, at time.Time) *domain.Trip {
 // calls: an approved checkout is captured.
 func (s *Service) HandleWebhook(ctx context.Context, eventType, resourceID string) error {
 	if eventType == "CHECKOUT.ORDER.APPROVED" {
+		// A group-buy order is held (AUTHORIZE), not captured: the money is
+		// taken only when everyone is in.
+		if s.IsGroupBuyOrder(resourceID) {
+			_, err := s.AuthorizeGroupBuyOrder(ctx, resourceID, "")
+			return err
+		}
 		_, err := s.CaptureDeposit(ctx, resourceID)
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/shop"
 )
 
 // clip never splits a letter that takes more than one byte.
@@ -75,4 +76,28 @@ func TestAddMembersIsAllOrNothing(t *testing.T) {
 	if _, err := s.Trip(trip, d); code(err) != "not_found" && code(err) != "forbidden" {
 		t.Fatalf("Dev was added by a refused call: %v", err)
 	}
+}
+
+// PayPal's webhook for a group-buy approval places the hold, like the
+// return page does, instead of trying to capture it as a top-up.
+func TestWebhookPlacesGroupBuyHold(t *testing.T) {
+	s, pp, _ := newTestService(t, nil)
+	s.SetShopper(shop.Demo{})
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	g := propose(t, s, trip, a, "beach towels")
+	for _, u := range []string{a, d} {
+		g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, u, ViaPayPal))
+	}
+	for _, u := range []string{a, d} {
+		if err := s.HandleWebhook(ctx, "CHECKOUT.ORDER.APPROVED", shareOf(g, u).OrderID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if g.Status != "paid" || len(pp.Captures) != 2 {
+		t.Fatalf("status %s captures %v", g.Status, pp.Captures)
+	}
+	checkBooks(t, s)
 }
