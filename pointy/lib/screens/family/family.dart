@@ -38,7 +38,7 @@ class _FamilyScreenState extends State<FamilyScreen> {
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    _reload();
+    if (mounted) _reload();
   }
 
   Future<void> _decide(Approval a, bool approve) async {
@@ -156,7 +156,7 @@ class _FamilyScreenState extends State<FamilyScreen> {
         FilledButton.icon(
           onPressed: () async {
             await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddChildScreen()));
-            _reload();
+            if (mounted) _reload();
           },
           icon: const Icon(Icons.person_add_alt_1_rounded),
           label: const Text('Add a child'),
