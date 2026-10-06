@@ -11,7 +11,7 @@ Pointy is a **wallet**. PayPal is used only at its two edges, with a US sandbox 
 
 Everything in between is an instant entry in Pointy's double-entry ledger, with no PayPal call: paying a Pointy user, requests, split bills, moving money into a trip, the trip paying a Pointy user (`mode: member`) or paying you back (`mode: reimburse`), and settle-up into balances. Balances are always derived from the ledger, never stored.
 
-A withdrawal holds the money first, calls PayPal, and posts only if PayPal accepts it; if PayPal refuses, nothing changes. If it later comes back (unclaimed and returned, failed, blocked) the entry is reversed and the money is back in the balance. `GET /api/money` checks that the money at PayPal equals what Pointy owes everyone.
+A withdrawal is saved as `sending` (which holds the money, also across restarts) before PayPal is called, and posts only if PayPal accepts it; if PayPal refuses, nothing changes. If it later comes back (unclaimed and returned, failed, blocked) the entry is reversed and the money is back in the balance. `GET /api/money` checks that the money at PayPal equals what Pointy owes everyone.
 
 ## Run it
 
@@ -61,7 +61,7 @@ The service runs as **one instance per database** (its in-memory copy is not sha
 
 ## API
 
-All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is integer paise. Send `Idempotency-Key` on every POST that moves money; a retry with the same key replays the first answer.
+All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is integer paise. Send `Idempotency-Key` on every POST that moves money; a retry with the same key replays the first answer (a retry while the first is still running waits for it). Keys are per signed-in user and ignored before sign-in (check-phone, register, login); the same key with a different body gets `422 idempotency_key_reused`, so make a new key when the request changes.
 
 | Area | Routes |
 |---|---|

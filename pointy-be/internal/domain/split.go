@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"math"
+	"math/bits"
+)
+
 type SplitMethod string
 
 const (
@@ -40,6 +45,9 @@ func Split(total Paise, method SplitMethod, in []SplitInput) ([]Share, error) {
 			if p.Exact < 0 {
 				return nil, Invalid("exact amounts cannot be negative")
 			}
+			if p.Exact > total-sum { // also stops the sum wrapping around
+				return nil, Invalid("exact amounts add up to more than %d paise", total)
+			}
 			out[i] = Share{p.UserID, p.Exact}
 			sum += p.Exact
 		}
@@ -58,11 +66,18 @@ func Split(total Paise, method SplitMethod, in []SplitInput) ([]Share, error) {
 			if w[i] <= 0 {
 				return nil, Invalid("every share weight must be more than zero")
 			}
+			if w[i] > math.MaxInt64-sumW {
+				return nil, Invalid("share weights are too large")
+			}
 			sumW += w[i]
 		}
 		var given Paise
 		for i, p := range in {
-			part := Paise(int64(total) * w[i] / sumW)
+			// total*w can pass int64, so multiply into 128 bits. The
+			// quotient fits: w <= sumW, so it is at most total.
+			hi, lo := bits.Mul64(uint64(total), uint64(w[i]))
+			q, _ := bits.Div64(hi, lo, uint64(sumW))
+			part := Paise(q)
 			out[i] = Share{p.UserID, part}
 			given += part
 		}

@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -29,11 +30,14 @@ type server struct {
 	idemList []idemKey          // keys oldest first, to forget old answers
 }
 
+// replay is the first answer to a request with an Idempotency-Key. While
+// that request is still running, done is open and retries wait for it.
 type replay struct {
-	status int // 0 while the first request is still running
-	body   []byte
-	at     time.Time
-	done   chan struct{} // closed when the first request has finished
+	fingerprint [32]byte      // hash of the request body
+	done        chan struct{} // closed when the first request has finished
+	status      int           // 0 while running, or after a server error
+	body        []byte
+	at          time.Time
 }
 
 type idemKey struct {
@@ -649,39 +653,41 @@ func (r *recorder) Write(b []byte) (int, error) {
 }
 
 // idempotent replays the first answer when a write is retried with the same
-// Idempotency-Key, so a double tap or a flaky network cannot pay twice. A
-// retry that arrives while the first is still running waits for its answer.
-// Keys belong to the signed-in caller; sign-in itself (public) is never
-// replayed, as its answer carries a token.
+// Idempotency-Key, so a double tap or a flaky network cannot pay twice.
+// Keys belong to the signed-in caller; a retry that arrives while the first
+// request is still running waits for its answer; the same key with a
+// different body is refused. Answers are kept for a day.
 func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(http.ResponseWriter)) {
 	key := r.Header.Get("Idempotency-Key")
+	// Sign-in and sign-up have no caller yet, so a key there could replay
+	// one person's token to another: they are never replayed.
 	if key == "" || userID(r) == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
 		next(w)
 		return
 	}
 	key = userID(r) + "|" + r.Method + "|" + r.URL.Path + "|" + key
+	// Hash the body, then hand the handler the same bytes.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	if err != nil {
+		writeErr(w, domain.Invalid("unreadable body"))
+		return
+	}
+	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), r.Body))
+	fp := sha256.Sum256(raw)
+
 	for {
 		s.mu.Lock()
 		s.forgetOldL()
 		old, seen := s.idem[key]
 		if !seen {
-			e := &replay{at: time.Now(), done: make(chan struct{})}
-			s.idem[key] = e
-			s.idemList = append(s.idemList, idemKey{key, e})
-			s.mu.Unlock()
-			rec := &recorder{ResponseWriter: w, status: http.StatusOK}
-			next(rec)
-			s.mu.Lock()
-			if rec.status < 500 { // a server error may be retried for real
-				e.status, e.body = rec.status, rec.body.Bytes()
-			} else if s.idem[key] == e {
-				delete(s.idem, key)
-			}
-			close(e.done)
-			s.mu.Unlock()
-			return
+			break // still locked
 		}
 		s.mu.Unlock()
+		if old.fingerprint != fp {
+			writeErr(w, &domain.Error{Status: http.StatusUnprocessableEntity, Code: "idempotency_key_reused",
+				Message: "this Idempotency-Key was already used for a different request; make a new key"})
+			return
+		}
 		select {
 		case <-old.done:
 		case <-r.Context().Done():
@@ -691,7 +697,7 @@ func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(ht
 		status, body := old.status, old.body
 		s.mu.Unlock()
 		if status == 0 {
-			continue // the first one failed with a server error: run this one
+			continue // the first try failed with a server error: run it again
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Idempotent-Replay", "true")
@@ -699,6 +705,25 @@ func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(ht
 		_, _ = w.Write(body)
 		return
 	}
+	mine := &replay{fingerprint: fp, done: make(chan struct{}), at: time.Now()}
+	s.idem[key] = mine
+	s.idemList = append(s.idemList, idemKey{key, mine})
+	s.mu.Unlock()
+
+	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
+	finished := false
+	defer func() { // also runs if the handler panics
+		s.mu.Lock()
+		if finished && rec.status < 500 { // a server error may be retried for real
+			mine.status, mine.body = rec.status, rec.body.Bytes()
+		} else if s.idem[key] == mine {
+			delete(s.idem, key)
+		}
+		s.mu.Unlock()
+		close(mine.done)
+	}()
+	next(rec)
+	finished = true
 }
 
 // forgetOldL drops answers older than a day, and the oldest when full.

@@ -153,27 +153,29 @@ func (s *Service) checkPIN(phone, pin string) (string, error) {
 			recent = append(recent, at)
 		}
 	}
-	s.failedLogins[phone] = recent
 	if len(recent) >= maxFailedPINs {
+		s.failedLogins[phone] = recent
 		s.mu.Unlock()
 		return "", &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_attempts", Message: "too many wrong PINs; try again in 15 minutes"}
 	}
 	id, ok := s.phones[phone]
-	var hash string
-	if ok {
-		hash = s.users[id].PinHash
+	if !ok {
+		// Nothing to guess, so nothing is counted: tries on numbers with no
+		// account must not fill memory.
+		delete(s.failedLogins, phone)
+		s.mu.Unlock()
+		return "", domain.NotFound("account for this number")
 	}
-	// Count the guess now, before the slow check, so many guesses sent at
-	// once cannot all slip under the limit. A right PIN clears it.
-	s.failedLogins[phone] = append(s.failedLogins[phone], s.now())
+	hash := s.users[id].PinHash
+	// Count this try as wrong before checking it, and take it back only if
+	// it is right: otherwise many guesses sent at once would all pass the
+	// limit above while bcrypt runs.
+	s.failedLogins[phone] = append(recent, s.now())
 	left := maxFailedPINs - len(s.failedLogins[phone])
 	s.mu.Unlock()
 
 	// bcrypt is slow on purpose, so it runs without the lock.
-	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(pin)) != nil {
-		if !ok {
-			return "", domain.NotFound("account for this number")
-		}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(pin)) != nil {
 		return "", &domain.Error{Status: http.StatusUnauthorized, Code: "wrong_pin", Message: "wrong PIN", Details: map[string]int{"attempts_left": left}}
 	}
 	s.mu.Lock()

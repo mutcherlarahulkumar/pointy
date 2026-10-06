@@ -1,0 +1,536 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
+	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/paypal"
+)
+
+// slowPayPal blocks SendPayout until released, to act while a withdrawal is
+// on its way to PayPal.
+type slowPayPal struct {
+	*paypal.Mock
+	entered, release chan struct{}
+}
+
+func (p *slowPayPal) SendPayout(ctx context.Context, ref, email string, amount domain.Paise, note string) (paypal.Payout, error) {
+	p.entered <- struct{}{}
+	<-p.release
+	return p.Mock.SendPayout(ctx, ref, email, amount, note)
+}
+
+// flakyStore is a memStore whose next Save can be made to fail. Like
+// Postgres, it keeps deposits and payouts as they were when saved and
+// loads them as new objects.
+type flakyStore struct {
+	memStore
+	mu       sync.Mutex
+	fail     bool
+	deposits []domain.Deposit
+	payouts  []domain.Payout
+}
+
+func (f *flakyStore) Save(ctx context.Context, items []any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail {
+		f.fail = false
+		return errors.New("database went away")
+	}
+	rest := []any{}
+	for _, it := range items {
+		switch v := it.(type) {
+		case *domain.Deposit:
+			f.deposits = upsert(f.deposits, *v, func(a, b domain.Deposit) bool { return a.OrderID == b.OrderID })
+		case *domain.Payout:
+			f.payouts = upsert(f.payouts, *v, func(a, b domain.Payout) bool { return a.ID == b.ID })
+		default:
+			rest = append(rest, it)
+		}
+	}
+	return f.memStore.Save(ctx, rest)
+}
+
+func upsert[T any](list []T, v T, same func(a, b T) bool) []T {
+	for i := range list {
+		if same(list[i], v) {
+			list[i] = v
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func (f *flakyStore) Load(ctx context.Context) (*Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	snap, err := f.memStore.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range f.deposits {
+		d := d
+		snap.Deposits = append(snap.Deposits, &d)
+	}
+	for _, p := range f.payouts {
+		p := p
+		snap.Payouts = append(snap.Payouts, &p)
+	}
+	return snap, nil
+}
+
+func (f *flakyStore) failNextSave() {
+	f.mu.Lock()
+	f.fail = true
+	f.mu.Unlock()
+}
+
+// blockingPayPal blocks CaptureOrder and PayoutStatus until released.
+type blockingPayPal struct {
+	*paypal.Mock
+	block            bool
+	entered, release chan struct{}
+}
+
+func (p *blockingPayPal) wait() {
+	if p.block {
+		p.entered <- struct{}{}
+		<-p.release
+	}
+}
+
+func (p *blockingPayPal) CaptureOrder(ctx context.Context, orderID string) error {
+	p.wait()
+	return p.Mock.CaptureOrder(ctx, orderID)
+}
+
+func (p *blockingPayPal) PayoutStatus(ctx context.Context, batchID string) (string, error) {
+	p.wait()
+	return p.Mock.PayoutStatus(ctx, batchID)
+}
+
+func newFlakyService(t *testing.T) (*Service, *flakyStore, *blockingPayPal) {
+	t.Helper()
+	st := &flakyStore{}
+	pp := &blockingPayPal{Mock: &paypal.Mock{}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return s, st, pp
+}
+
+// A failed save in the middle of a capture reloads the deposit as a new
+// object. The capture must still credit exactly once, however often the
+// app then retries.
+func TestCaptureDuringReloadCreditsOnce(t *testing.T) {
+	s, st, pp := newFlakyService(t)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(500)))
+	pp.block = true
+	done := make(chan error)
+	go func() { _, err := s.CaptureDeposit(ctx, d.OrderID); done <- err }()
+	<-pp.entered
+	st.failNextSave()
+	_ = s.MarkAlertsSeen(a) // fails and reloads everything
+	pp.block = false
+	// The app retries while the first capture is still waiting on PayPal.
+	_, _ = s.CaptureDeposit(ctx, d.OrderID)
+	close(pp.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.CaptureDeposit(ctx, d.OrderID)
+	if b := balance(s, a); b != domain.Rupees(500) {
+		t.Fatalf("balance %d after one ₹500 top-up", b)
+	}
+	if got := must[*domain.Deposit](t)(s.Deposit(d.OrderID, a)); got.Status != "captured" {
+		t.Fatalf("deposit is %s", got.Status)
+	}
+	checkBooks(t, s)
+}
+
+// The same for a payout PayPal sends back: it is given back once.
+func TestReturnedPayoutDuringReloadIsGivenBackOnce(t *testing.T) {
+	s, st, pp := newFlakyService(t)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(1000)))
+	must[*domain.Deposit](t)(s.CaptureDeposit(ctx, d.OrderID))
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	pp.PayoutFirst = "PENDING"
+	must[*domain.Payout](t)(s.Withdraw(ctx, a, domain.Rupees(400)))
+	pp.PayoutLater = "RETURNED"
+	pp.block = true
+	done := make(chan struct{})
+	go func() { s.RefreshPayouts(ctx, a); close(done) }()
+	<-pp.entered
+	st.failNextSave()
+	_ = s.MarkAlertsSeen(a)
+	pp.block = false
+	close(pp.release)
+	<-done
+	s.RefreshPayouts(ctx, a)
+	s.RefreshPayouts(ctx, a)
+	if b := balance(s, a); b != domain.Rupees(1000) {
+		t.Fatalf("balance %d: the ₹400 should come back once", b)
+	}
+	checkBooks(t, s)
+}
+
+// Many withdrawals of the whole balance at once: only one may go through,
+// and the balance never goes below zero.
+func TestConcurrentWithdrawalsCannotOverdraw(t *testing.T) {
+	s, pp, _ := newTestService(t, nil)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	for round := 0; round < 20; round++ {
+		topUp(t, s, a, 1000)
+		before := len(pp.Payouts)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, _ = s.Withdraw(ctx, a, domain.Rupees(1000))
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if b := balance(s, a); b != 0 {
+			t.Fatalf("round %d: balance %d after withdrawing everything", round, b)
+		}
+		if n := len(pp.Payouts) - before; n != 1 {
+			t.Fatalf("round %d: %d payouts sent for one balance", round, n)
+		}
+		checkBooks(t, s)
+	}
+}
+
+// A failed save reloads the state from the database. Money held for a
+// withdrawal still on its way to PayPal must stay held.
+func TestReloadKeepsWithdrawalHolds(t *testing.T) {
+	st := &flakyStore{}
+	pp := &slowPayPal{Mock: &paypal.Mock{}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 1000)
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+
+	done := make(chan error)
+	go func() {
+		_, err := s.Withdraw(context.Background(), a, domain.Rupees(1000))
+		done <- err
+	}()
+	<-pp.entered
+	st.mu.Lock()
+	st.fail = true
+	st.mu.Unlock()
+	if err := s.MarkAlertsSeen(d); code(err) != "storage_error" {
+		t.Fatalf("expected the save to fail: %v", err)
+	}
+	if _, err := s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(1000), PayeeUserID: d}); code(err) != "insufficient_balance" {
+		t.Fatalf("money on its way to PayPal was spent again: %v", err)
+	}
+	close(pp.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if b := balance(s, a); b != 0 {
+		t.Fatalf("balance %d", b)
+	}
+	checkBooks(t, s)
+}
+
+// PIN guesses sent in parallel must not get past the five-try lockout:
+// each guess counts before the slow bcrypt check, not after it.
+func TestParallelPINGuessesAreCapped(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	register(t, s, "Asha", "9876543210")
+	var mu sync.Mutex
+	tried := 0
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := s.Login("9876543210", fmt.Sprintf("%06d", 100000+i*7))
+			if c := code(err); c == "wrong_pin" || c == "" {
+				mu.Lock()
+				tried++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if tried > maxFailedPINs {
+		t.Fatalf("%d PINs were checked in parallel; the limit is %d", tried, maxFailedPINs)
+	}
+}
+
+// A payment between balances happens now: a back-dated "at" from the app
+// must not move it into another day (it would slip past a child's daily
+// and monthly limits, and reorder history).
+func TestPersonalPaymentCannotBeBackdated(t *testing.T) {
+	s, c, _, k := family(t)
+	shop := register(t, s, "Shop", "9988776655")
+	old := c.t.AddDate(0, -2, 0)
+	// The daily limit is ₹300; five back-dated ₹100 payments are ₹500 today.
+	var err error
+	for i := 0; i < 5 && err == nil; i++ {
+		_, err = s.PayPersonal(k, ExpenseInput{Description: "Sweets", Amount: domain.Rupees(100), PayeeUserID: shop, At: &old})
+	}
+	if code(err) != "needs_parent" {
+		t.Fatalf("back-dated payments got past the daily limit: %v", err)
+	}
+	for _, h := range s.History(k) {
+		if h.At.Before(c.t) && h.Kind == "payment" {
+			t.Fatalf("payment recorded at %v, before now %v", h.At, c.t)
+		}
+	}
+}
+
+// A trip wallet paying a child (mode member) is money into a child account
+// like any other: the child-wallet caps apply.
+func TestTripPaymentToChildKeepsChildCaps(t *testing.T) {
+	s, _, p, k := family(t)
+	x := register(t, s, "Asha", "9988776655")
+	topUp(t, s, p, 20000)
+	topUp(t, s, x, 20000)
+	trip := goa(t, s, p, x)
+	must[TripView](t)(s.DepositFromBalance(trip, p, domain.Rupees(15000)))
+	must[TripView](t)(s.DepositFromBalance(trip, x, domain.Rupees(15000)))
+	_, err := s.AddExpense(trip, p, ExpenseInput{Description: "Gift", Category: domain.Other, Amount: domain.Rupees(20000),
+		Mode: ModeMember, PayeeUserID: k, ConfirmOverBudget: true})
+	if code(err) != "child_balance_cap" {
+		t.Fatalf("₹20,000 into a child account from a trip: %v", err)
+	}
+	if b := balance(s, k); b > ChildMaxBalance {
+		t.Fatalf("child holds %d", b)
+	}
+	checkBooks(t, s)
+}
+
+// Splitting a bill with a long description still sends the requests: the
+// note "Your share of ..." is cut to fit, not refused as the person's own
+// note would be.
+func TestSplitBillLongDescription(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	desc := "Birthday dinner at the rooftop place near the station, with cake and drinks"
+	res, err := s.SplitBill(a, SplitBillInput{Description: desc, Amount: 100000, Participants: []domain.SplitInput{{UserID: a}, {UserID: d}}})
+	if err != nil {
+		t.Fatalf("%d-letter description: %v", len(desc), err)
+	}
+	if n := len([]rune(res.Requests[0].Note)); n > 80 {
+		t.Fatalf("note of %d letters", n)
+	}
+}
+
+// Amount edges on every way money moves between people.
+func TestAmountEdges(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 100000)
+	topUp(t, s, a, 100000)
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	for _, amt := range []Paise{0, -1, -MaxAmount, MaxAmount + 1, 1 << 62} {
+		if _, err := s.PayPersonal(a, ExpenseInput{Description: "x", Amount: amt, PayeeUserID: d}); code(err) != "invalid" {
+			t.Fatalf("pay %d: %v", amt, err)
+		}
+		if _, err := s.RequestMoney(d, MoneyRequestInput{PayerID: a, Amount: amt}); code(err) != "invalid" {
+			t.Fatalf("request %d: %v", amt, err)
+		}
+		if _, err := s.Withdraw(ctx, a, amt); code(err) != "invalid" {
+			t.Fatalf("withdraw %d: %v", amt, err)
+		}
+		if _, err := s.StartTopUp(ctx, a, amt); code(err) != "invalid" {
+			t.Fatalf("top up %d: %v", amt, err)
+		}
+		if _, err := s.SplitBill(a, SplitBillInput{Description: "x", Amount: amt, Participants: []domain.SplitInput{{UserID: d}}}); code(err) != "invalid" {
+			t.Fatalf("split %d: %v", amt, err)
+		}
+	}
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "x", Amount: 1, PayeeUserID: d}))
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "x", Amount: MaxAmount, PayeeUserID: d}))
+	if balance(s, d) != MaxAmount+1 {
+		t.Fatalf("Dev %d", balance(s, d))
+	}
+	// ₹1 between three people: 34 + 33 + 33 paise.
+	m := register(t, s, "Meera", "9988776655")
+	res := must[SplitBillResult](t)(s.SplitBill(a, SplitBillInput{Description: "Toffee", Amount: 100, Participants: []domain.SplitInput{{UserID: a}, {UserID: d}, {UserID: m}}}))
+	if res.Shares[0].Amount+res.Shares[1].Amount+res.Shares[2].Amount != 100 || len(res.Requests) != 2 {
+		t.Fatalf("shares %+v", res.Shares)
+	}
+	// One paisa between two: only one of them owes anything.
+	res = must[SplitBillResult](t)(s.SplitBill(a, SplitBillInput{Description: "Toffee", Amount: 1, Participants: []domain.SplitInput{{UserID: d}, {UserID: m}}}))
+	if len(res.Requests) != 1 || res.Requests[0].Amount != 1 {
+		t.Fatalf("1 paisa: %+v", res.Requests)
+	}
+	checkBooks(t, s)
+}
+
+// Requests: pay twice, pay after decline, decline by someone else, ask
+// yourself, ask someone unknown, pay without the money.
+func TestMoneyRequestEdges(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	m := register(t, s, "Meera", "9988776655")
+	if _, err := s.RequestMoney(a, MoneyRequestInput{PayerID: a, Amount: 100}); code(err) != "invalid" {
+		t.Fatalf("ask yourself: %v", err)
+	}
+	if _, err := s.RequestMoney(a, MoneyRequestInput{PayerID: "u_nobody", Amount: 100}); code(err) != "invalid" {
+		t.Fatalf("ask nobody: %v", err)
+	}
+	r := must[MoneyRequestView](t)(s.RequestMoney(a, MoneyRequestInput{PayerID: d, Amount: 100}))
+	if _, err := s.PayMoneyRequest(d, r.ID); code(err) != "insufficient_balance" {
+		t.Fatalf("pay without money: %v", err)
+	}
+	if _, err := s.DeclineMoneyRequest(m, r.ID); code(err) != "not_found" {
+		t.Fatalf("decline by a stranger: %v", err)
+	}
+	if _, err := s.PayMoneyRequest(m, r.ID); code(err) != "not_found" {
+		t.Fatalf("pay by a stranger: %v", err)
+	}
+	must[MoneyRequestView](t)(s.DeclineMoneyRequest(d, r.ID))
+	topUp(t, s, d, 10)
+	if _, err := s.PayMoneyRequest(d, r.ID); code(err) != "already_closed" {
+		t.Fatalf("pay after decline: %v", err)
+	}
+	r2 := must[MoneyRequestView](t)(s.RequestMoney(a, MoneyRequestInput{PayerID: d, Amount: 100}))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = s.PayMoneyRequest(d, r2.ID) }()
+	}
+	wg.Wait()
+	if balance(s, a) != 100 || balance(s, d) != 900 {
+		t.Fatalf("request paid more than once: %d %d", balance(s, a), balance(s, d))
+	}
+	checkBooks(t, s)
+}
+
+// The return page, the webhook and the app may all capture at once.
+func TestParallelCapturesCreditOnce(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	dep := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(700)))
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = s.HandleWebhook(ctx, "CHECKOUT.ORDER.APPROVED", dep.OrderID)
+			} else {
+				_, _ = s.CaptureDeposit(ctx, dep.OrderID)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if b := balance(s, a); b != domain.Rupees(700) {
+		t.Fatalf("balance %d", b)
+	}
+	checkBooks(t, s)
+}
+
+// PayPal has paid a withdrawal out, but saving that fails (or the server
+// stops) before it is written down. The money has left: it must not be
+// spendable again, now or after a restart.
+func TestPayoutSentButNotSavedStaysHeld(t *testing.T) {
+	st := &flakyStore{}
+	pp := &slowPayPal{Mock: &paypal.Mock{}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, st)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 1000)
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	done := make(chan error)
+	go func() {
+		_, err := s.Withdraw(context.Background(), a, domain.Rupees(1000))
+		done <- err
+	}()
+	<-pp.entered
+	st.failNextSave()
+	close(pp.release)
+	if err := <-done; code(err) != "storage_error" {
+		t.Fatalf("withdraw: %v", err)
+	}
+	if len(pp.Payouts) != 1 {
+		t.Fatal("PayPal should have paid")
+	}
+	if _, err := s.PayPersonal(a, ExpenseInput{Description: "Chai", Amount: domain.Rupees(1000), PayeeUserID: d}); code(err) != "insufficient_balance" {
+		t.Fatalf("money PayPal already paid out was spent again: %v", err)
+	}
+	s2 := New(pp, c.now, st)
+	if err := s2.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.Withdraw(context.Background(), a, domain.Rupees(1000)); code(err) != "insufficient_balance" {
+		t.Fatalf("after a restart the same money could be withdrawn again: %v", err)
+	}
+}
+
+// Sign-in tries on numbers with no account keep nothing in memory.
+func TestUnknownNumbersDoNotFillLockoutMemory(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	for i := 0; i < 200; i++ {
+		if _, err := s.Login(fmt.Sprintf("98%08d", i), "135790"); code(err) != "not_found" {
+			t.Fatalf("unknown number: %v", err)
+		}
+	}
+	s.mu.Lock()
+	n := len(s.failedLogins)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d numbers kept", n)
+	}
+}
+
+// Item prices so big they wrap around int64 must be refused, not added up
+// into a small, wrong bill.
+func TestSplitByItemsRefusesHugeItems(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	huge := Paise(1 << 62)
+	_, err := s.SplitByItems(a, ItemSplitInput{Description: "Dinner", Items: []ItemShareLine{
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Gold plate", Amount: huge, People: []string{d}},
+		{Name: "Chai", Amount: 500, People: []string{d}},
+		{Name: "Dosa", Amount: 100, People: []string{a}},
+	}})
+	if code(err) != "invalid" {
+		t.Fatalf("huge items: %v", err)
+	}
+	if len(s.MoneyRequests(d)) != 0 {
+		t.Fatal("a request was sent")
+	}
+}

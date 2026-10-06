@@ -63,10 +63,6 @@ type Service struct {
 	groupBuys     []*domain.GroupBuy               // purchases a trip's agent found, bought together
 	familyLinks   []*domain.FamilyLink             // parent and child accounts
 	approvals     []*domain.Approval               // child payments waiting for a parent
-	// holds is money set aside while a PayPal payout is being sent, so it
-	// cannot be spent twice in the meantime. Never stored: a payout either
-	// finishes (and is posted) or is released.
-	holds map[string]Paise
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
@@ -93,7 +89,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, failedCodes: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
+		failedLogins: map[string][]time.Time{}, failedCodes: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{},
 	}
 }
 
@@ -483,6 +479,22 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A failed save elsewhere may have reloaded the state while PayPal was
+	// called: carry on with the deposit as it is now.
+	if cur, ok := s.deposits[orderID]; ok {
+		d = cur
+	}
+	// The ledger is the record: never credit the same order twice.
+	if s.ledgerHasRefL(orderID, "topup", "deposit") {
+		if d.Status != "captured" {
+			d.Status = "captured"
+			s.track(d)
+			if err := s.commitL(); err != nil {
+				return nil, err
+			}
+		}
+		return d, nil
+	}
 	if perr != nil {
 		d.Status = "created"
 		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", map[string]any{"paypal": perr.Error()})
@@ -514,6 +526,17 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		return nil, err
 	}
 	return d, nil
+}
+
+// ledgerHasRefL says whether an entry of one of these kinds was already
+// posted for ref (a PayPal order or payout id).
+func (s *Service) ledgerHasRefL(ref string, kinds ...string) bool {
+	for _, e := range s.ledger.Entries() {
+		if e.Ref == ref && contains(kinds, e.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 // DepositFromBalance moves money from the person's balance into their trip
