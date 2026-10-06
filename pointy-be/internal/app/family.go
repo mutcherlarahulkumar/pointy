@@ -682,6 +682,9 @@ type ApprovalInput struct {
 	Note    string `json:"note"`
 }
 
+// maxOpenApprovals keeps a child from flooding the parent with asks.
+const maxOpenApprovals = 3
+
 // AskApproval sends an over-limit payment to the parent's phone.
 func (s *Service) AskApproval(childID string, in ApprovalInput) (ApprovalView, error) {
 	s.mu.Lock()
@@ -701,6 +704,16 @@ func (s *Service) AskApproval(childID string, in ApprovalInput) (ApprovalView, e
 	}
 	if bal := s.availL(domain.PersonalAccount(childID)); bal < in.Amount {
 		return ApprovalView{}, domain.Conflict("insufficient_balance", "your balance is "+INR(bal), nil)
+	}
+	s.expireFamilyL()
+	open := 0
+	for _, x := range s.approvals {
+		if x.ChildID == childID && x.Status == "pending" {
+			open++
+		}
+	}
+	if open >= maxOpenApprovals {
+		return ApprovalView{}, domain.Conflict("too_many_asks", "wait for an answer to the ones you have asked", nil)
 	}
 	note := clip(strings.TrimSpace(in.Note), 80)
 	now := s.now()

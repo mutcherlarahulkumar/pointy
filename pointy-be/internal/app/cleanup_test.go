@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/mutcherlarahulkumar/pointy/pointy-be/internal/domain"
 )
@@ -32,4 +33,32 @@ func TestOldTripOrderIsNotCapturedAfterSettle(t *testing.T) {
 		t.Fatalf("capture into a settled trip: %v", err)
 	}
 	checkBooks(t, s)
+}
+
+// A child can have only a few asks waiting, so the parent is not flooded.
+func TestChildCannotFloodTheParentWithAsks(t *testing.T) {
+	s, c, p, k := family(t)
+	shop := register(t, s, "Canteen", "9988776655")
+	ask := func() error {
+		_, err := s.AskApproval(k, ApprovalInput{PayeeID: shop, Amount: domain.Rupees(50)})
+		return err
+	}
+	for i := 0; i < maxOpenApprovals; i++ {
+		if err := ask(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ask(); code(err) != "too_many_asks" {
+		t.Fatalf("ask over the cap: %v", err)
+	}
+	// Once one is answered, or they expire, the child can ask again.
+	f := must[FamilyView](t)(s.Family(p))
+	must[ApprovalView](t)(s.DecideApproval(p, f.Approvals[0].ID, false, ""))
+	if err := ask(); err != nil {
+		t.Fatal(err)
+	}
+	c.t = c.t.Add(approvalWindow + time.Minute)
+	if err := ask(); err != nil {
+		t.Fatal(err)
+	}
 }

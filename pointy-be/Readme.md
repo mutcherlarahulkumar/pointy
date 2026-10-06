@@ -78,7 +78,7 @@ All `/api` routes except `auth/*` need `Authorization: Bearer <token>`. Money is
 | Assistant | `POST /api/trips/{id}/assistant/plan`, `POST .../plans/{planID}/confirm`, `GET /api/trips/{id}/requests`, `POST /api/requests/{id}/remind`, `POST /api/requests/{id}/pay` |
 | PayPal | `GET /paypal/return` (finishes a checkout), `GET /paypal/cancel`, `POST /webhooks/paypal` |
 
-Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `group_buy_open`, `group_buy_closed`, `search_expired`, `needs_parent`, `wrong_parent_code`, `child_payment_cap`, `child_balance_cap`, `child_month_cap`, `child_account`, `not_a_child`, `wrong_code`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`.
+Errors are `{"error":{"code","message","details"}}`; codes include `budget_warning`, `insufficient_share`, `insufficient_balance`, `trip_closed`, `reminder_cap`, `not_approved`, `no_paypal_email`, `payment_in_progress`, `group_buy_open`, `group_buy_closed`, `search_expired`, `needs_parent`, `wrong_parent_code`, `too_many_codes`, `too_many_asks`, `approval_closed`, `child_payment_cap`, `child_balance_cap`, `child_month_cap`, `child_account`, `not_a_child`, `wrong_code`, `paypal_error`, `wrong_pin`, `too_many_attempts`, `signed_out`, `idempotency_key_reused` (422).
 
 ## AI features (optional)
 
