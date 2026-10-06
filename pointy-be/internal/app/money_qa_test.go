@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -117,6 +118,32 @@ func TestReloadKeepsWithdrawalHolds(t *testing.T) {
 		t.Fatalf("balance %d", b)
 	}
 	checkBooks(t, s)
+}
+
+// PIN guesses sent in parallel must not get past the five-try lockout:
+// each guess counts before the slow bcrypt check, not after it.
+func TestParallelPINGuessesAreCapped(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	register(t, s, "Asha", "9876543210")
+	var mu sync.Mutex
+	tried := 0
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := s.Login("9876543210", fmt.Sprintf("%06d", 100000+i*7))
+			if c := code(err); c == "wrong_pin" || c == "" {
+				mu.Lock()
+				tried++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if tried > maxFailedPINs {
+		t.Fatalf("%d PINs were checked in parallel; the limit is %d", tried, maxFailedPINs)
+	}
 }
 
 // Item prices so big they wrap around int64 must be refused, not added up
