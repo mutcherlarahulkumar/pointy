@@ -1,0 +1,160 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:pointy/api.dart';
+import 'package:pointy/screens/money/bill_split.dart';
+import 'package:pointy/screens/money/split_flow.dart';
+import 'package:pointy/theme.dart';
+
+import 'fakes.dart';
+
+const _me = 'u_c190dd4c22ea';
+const _dev = 'u_e30a147f6407';
+const _splitOk = '{"requests":[{"id":"mr_1","payer":{"id":"$_dev","name":"Dev Mehta"},"payee":{"id":"$_me","name":"Asha Rao"},'
+    '"amount_paise":50000,"note":"Dinner","status":"open","created_at":"2026-10-05T12:00:00+05:30"}]}';
+const _itemsOk = '{"total_paise":100000,"parts":[{"user":{"id":"$_dev","name":"Dev Mehta"},"items":["Thali"],'
+    '"subtotal_paise":100000,"extra_paise":0,"total_paise":100000}],"requests":[]}';
+const _conflict = '{"error":{"code":"invalid","message":"try again"}}';
+
+/// An ApiClient whose connection always drops.
+ApiClient offlineApi(List<http.Request> log) {
+  final c = MockClient((req) async {
+    log.add(req);
+    throw http.ClientException('connection reset');
+  });
+  return ApiClient(baseUrl: 'http://test', client: c)
+    ..token = 't'
+    ..userId = _me;
+}
+
+void main() {
+  final sent = <http.Request>[];
+  List<String> keys(String path) => [for (final r in sent.where((r) => r.url.path == path)) r.headers['Idempotency-Key']!];
+
+  setUp(() {
+    AppText.useGoogleFonts = false;
+    sent.clear();
+  });
+
+  // The error snack bar sits over the button; the person waits for it to go.
+  Future<void> dismissSnack(WidgetTester tester) async {
+    tester.state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger)).removeCurrentSnackBar();
+    await tester.pumpAndSettle();
+  }
+
+  void phone(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.7;
+    addTearDown(tester.view.reset);
+  }
+
+  group('SubmitKey', () {
+    test('the same request keeps its key, a changed one gets a new key', () {
+      final k = SubmitKey();
+      final a = k.forRequest({'amount': 1});
+      expect(k.forRequest({'amount': 1}), a);
+      expect(k.forRequest({'amount': 2}), isNot(a));
+    });
+
+    test('an error the server kept (4xx) needs a new key; a dropped connection does not', () {
+      final k = SubmitKey();
+      final a = k.forRequest('x');
+      k.failed(ApiException(0, 'offline', ''));
+      expect(k.forRequest('x'), a);
+      k.failed(ApiException(503, 'error', ''));
+      expect(k.forRequest('x'), a);
+      k.failed(ApiException(409, 'insufficient_balance', ''));
+      expect(k.forRequest('x'), isNot(a));
+    });
+  });
+
+  Future<void> openSplitReview(WidgetTester tester) async {
+    phone(tester);
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const SplitBillScreen(amountPaise: 100000, what: 'Dinner')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dev Mehta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue with 2 people'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('split a bill: changing the split after an error sends a new Idempotency-Key', (tester) async {
+    api = fakeApi(log: sent, overrides: {'POST /api/splits': (409, _conflict)})..userId = _me;
+    await openSplitReview(tester);
+    await tester.tap(find.text('Ask for ₹500'));
+    await tester.pumpAndSettle();
+    expect(find.text('Try again'), findsOneWidget);
+    await dismissSnack(tester);
+
+    // The person changes the split, then sends again.
+    api = fakeApi(log: sent, overrides: {'POST /api/splits': (201, _splitOk)})..userId = _me;
+    await tester.tap(find.text('By shares'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Ask for'));
+    await tester.pumpAndSettle();
+
+    final k = keys('/api/splits');
+    expect(k, hasLength(2));
+    expect(k[1], isNot(k[0]));
+    expect(find.text('Sent 1 request'), findsOneWidget);
+  });
+
+  testWidgets('split a bill: a retry after a dropped connection reuses the key', (tester) async {
+    api = fakeApi(log: sent)..userId = _me;
+    await openSplitReview(tester);
+    api = offlineApi(sent);
+    await tester.tap(find.text('Ask for ₹500'));
+    await tester.pumpAndSettle();
+    await dismissSnack(tester);
+    api = fakeApi(log: sent, overrides: {'POST /api/splits': (201, _splitOk)})..userId = _me;
+    await tester.tap(find.text('Ask for ₹500'));
+    await tester.pumpAndSettle();
+    final k = keys('/api/splits');
+    expect(k, hasLength(2));
+    expect(k[1], k[0]);
+  });
+
+  testWidgets('split by items: changing who had what after an error sends a new Idempotency-Key', (tester) async {
+    phone(tester);
+    api = fakeApi(log: sent, overrides: {'POST /api/splits/items': (409, _conflict)})..userId = _me;
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const BillSplitScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Item'), 'Thali');
+    await tester.enterText(find.widgetWithText(TextField, 'Price'), '1000');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue · ₹1,000'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dev Mehta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue with 2 people'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Everyone'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send requests'));
+    await tester.pumpAndSettle();
+    expect(find.text('Try again'), findsOneWidget);
+    await dismissSnack(tester);
+
+    // Only Dev had it after all.
+    api = fakeApi(log: sent, overrides: {'POST /api/splits/items': (201, _itemsOk)})..userId = _me;
+    await tester.tap(find.widgetWithText(FilterChip, 'You'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send requests'));
+    await tester.pumpAndSettle();
+
+    final k = keys('/api/splits/items');
+    expect(k, hasLength(2));
+    expect(k[1], isNot(k[0]));
+    expect(find.text('Sent 1 request'), findsOneWidget);
+  });
+}

@@ -247,7 +247,7 @@ class _AssignScreen extends StatefulWidget {
 }
 
 class _AssignScreenState extends State<_AssignScreen> {
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   List<Person> get _everyone => [Person(id: api.userId, name: 'You', phone: ''), ...widget.d.people];
@@ -275,12 +275,9 @@ class _AssignScreenState extends State<_AssignScreen> {
   Future<void> _send() async {
     setState(() => _busy = true);
     try {
-      final parts = await api.splitByItems(
-        widget.d.what,
-        [for (final it in widget.d.items) {'name': it.name, 'amount_paise': it.amountPaise, 'people': it.people.toList()}],
-        widget.d.extraPaise,
-        key: _key,
-      );
+      final items = [for (final it in widget.d.items) {'name': it.name, 'amount_paise': it.amountPaise, 'people': it.people.toList()}];
+      final parts = await api.splitByItems(widget.d.what, items, widget.d.extraPaise,
+          key: _key.forRequest([widget.d.what, items, widget.d.extraPaise]));
       if (!mounted) return;
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
       final asked = parts.where((p) => p.user.id != api.userId);
@@ -294,6 +291,7 @@ class _AssignScreenState extends State<_AssignScreen> {
         ),
       ));
     } catch (e) {
+      _key.failed(e);
       if (mounted) {
         setState(() => _busy = false);
         showError(context, e);

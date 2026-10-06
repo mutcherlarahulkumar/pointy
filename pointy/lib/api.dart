@@ -31,6 +31,35 @@ String defaultBaseUrl() {
 /// for retries of that same attempt, so a double tap cannot pay twice.
 String newIdempotencyKey() => const Uuid().v4();
 
+/// The Idempotency-Key for one screen's submit button.
+///
+/// The same request sent again (a double tap, a retry after the connection
+/// dropped) reuses its key, so it can only happen once. A changed request
+/// gets a fresh key (the server refuses one key for two different bodies),
+/// and so does any try after the server answered with an error (4xx): it
+/// keeps that answer under the key and would only repeat it.
+class SubmitKey {
+  String _key = newIdempotencyKey();
+  String? _sent;
+
+  /// The key for sending [request] (the body, or whatever identifies it).
+  String forRequest(Object? request) {
+    final text = jsonEncode(request);
+    if (_sent != null && _sent != text) _key = newIdempotencyKey();
+    _sent = text;
+    return _key;
+  }
+
+  /// Call when a send failed. Network errors and 5xx keep the key, so a
+  /// retry cannot pay twice; answers the server kept (4xx) do not.
+  void failed(Object error) {
+    if (error is ApiException && error.status >= 400 && error.status < 500) {
+      _key = newIdempotencyKey();
+      _sent = null;
+    }
+  }
+}
+
 /// One class that knows every endpoint. Screens call these methods and get
 /// model objects back.
 class ApiClient {

@@ -120,7 +120,7 @@ class _SplitReviewScreenState extends State<_SplitReviewScreen> {
   bool _includeMe = true;
   bool _byShares = false;
   final Map<String, int> _weights = {};
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   List<String> get _ids => [if (_includeMe) api.userId, ...widget.people.map((p) => p.id)];
@@ -134,12 +134,13 @@ class _SplitReviewScreenState extends State<_SplitReviewScreen> {
   Future<void> _send() async {
     setState(() => _busy = true);
     try {
-      final made = await api.splitBill({
+      final body = {
         'description': widget.what,
         'amount_paise': widget.amountPaise,
         'split_method': _byShares ? 'shares' : 'equal',
         'participants': [for (final id in _ids) {'user_id': id, 'weight': _weights[id] ?? 1}],
-      }, key: _key);
+      };
+      final made = await api.splitBill(body, key: _key.forRequest(body));
       if (!mounted) return;
       final asked = made.fold<int>(0, (a, r) => a + r.amountPaise);
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
@@ -153,6 +154,7 @@ class _SplitReviewScreenState extends State<_SplitReviewScreen> {
         ),
       ));
     } catch (e) {
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);
