@@ -252,6 +252,17 @@ class _AssignScreenState extends State<_AssignScreen> {
 
   List<Person> get _everyone => [Person(id: api.userId, name: 'You', phone: ''), ...widget.d.people];
 
+  @override
+  void initState() {
+    super.initState();
+    // Back on step 2 someone may have been taken off the list: their items
+    // are no longer theirs (they would still be asked to pay otherwise).
+    final ids = _everyone.map((p) => p.id).toSet();
+    for (final it in widget.d.items) {
+      it.people.retainAll(ids);
+    }
+  }
+
   // A preview of each person's part, with the same rules as the server:
   // items split equally between who had them, extras by each subtotal.
   Map<String, int> _preview() {
