@@ -201,3 +201,39 @@ func TestPINGuessesAtOnceShareTheLockout(t *testing.T) {
 		t.Fatalf("should be locked: %v", err)
 	}
 }
+
+// The time of a payment is the server's: a back-dated "at" cannot hide a
+// child's spending or pocket money from this day's and month's limits.
+func TestBackDatedPaymentsCountTowardsChildLimits(t *testing.T) {
+	s, c, p, k := family(t)
+	shop := register(t, s, "Canteen", "9988776655")
+	lastMonth := c.t.AddDate(0, -1, 0)
+	must[*domain.Expense](t)(s.PayPersonal(k, ExpenseInput{Description: "Snacks", Amount: domain.Rupees(250), PayeeUserID: shop, At: &lastMonth}))
+	if _, err := s.PayPersonal(k, ExpenseInput{Description: "Snacks", Amount: domain.Rupees(250), PayeeUserID: shop, At: &lastMonth}); code(err) != "needs_parent" {
+		t.Fatalf("₹500 today with a ₹300 daily limit: %v", err)
+	}
+
+	// Pocket money: ₹2,000 in already this month.
+	must[ChildView](t)(s.SetChildLimits(p, k, domain.Rupees(10000), domain.Rupees(10000), pin))
+	must[*domain.Expense](t)(s.PayPersonal(p, ExpenseInput{Description: "More", Amount: domain.Rupees(6000), PayeeUserID: k, At: &lastMonth}))
+	for i := 0; i < 3; i++ {
+		must[*domain.Expense](t)(s.PayPersonal(k, ExpenseInput{Description: "Books", Amount: domain.Rupees(2000), PayeeUserID: shop}))
+	}
+	if _, err := s.PayPersonal(p, ExpenseInput{Description: "Even more", Amount: domain.Rupees(3000), PayeeUserID: k}); code(err) != "child_month_cap" {
+		t.Fatalf("₹11,000 received this month: %v", err)
+	}
+}
+
+// A trip payment to a child counts in this month, whatever "at" says.
+func TestBackDatedTripPaymentToAChildIsNow(t *testing.T) {
+	s, c, _, k := family(t)
+	a := register(t, s, "Asha", "9811111111")
+	topUp(t, s, a, 5000)
+	trip := goa(t, s, a)
+	must[TripView](t)(s.DepositFromBalance(trip, a, domain.Rupees(3000)))
+	lastMonth := c.t.AddDate(0, -1, 0)
+	e := must[*domain.Expense](t)(s.AddExpense(trip, a, ExpenseInput{Description: "Gift", Amount: domain.Rupees(1000), Mode: ModeMember, PayeeUserID: k, At: &lastMonth}))
+	if !e.At.Equal(c.t) {
+		t.Fatalf("paid to a child at %v", e.At)
+	}
+}
