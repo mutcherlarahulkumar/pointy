@@ -16,6 +16,7 @@ import 'package:pointy/screens/money/split_flow.dart';
 import 'package:pointy/screens/money/top_up.dart';
 import 'package:pointy/screens/money/withdraw.dart';
 import 'package:pointy/screens/profile/profile.dart';
+import 'package:pointy/screens/trips/expense_flow.dart';
 import 'package:pointy/screens/trips/settle.dart';
 import 'package:pointy/screens/trips/trip_shell.dart';
 import 'package:pointy/screens/trips/trips.dart';
@@ -99,4 +100,22 @@ void main() {
   testWidgets('child home', (tester) => show(tester, const ChildHome()));
   testWidgets('profile', (tester) => show(tester, const ProfileScreen()));
   testWidgets('insights', (tester) => show(tester, const InsightsScreen()));
+  testWidgets('trip expense review with a long payee name', (tester) async {
+    final trip = (await api.trips()).first;
+    await show(tester, ExpenseAmountScreen(trip: trip, amountPaise: 120000, what: 'Dinner'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Recent'), 100, scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(_long).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check and pay'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Money goes to'), 100, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+  });
 }

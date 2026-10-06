@@ -13,6 +13,7 @@ import '../../widgets/ai_mark.dart';
 import '../../widgets/amount_field.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/detail_row.dart';
 import '../../widgets/flow_scaffold.dart';
 import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
@@ -582,32 +583,22 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         SurfaceCard(
           child: Column(
             children: [
-              _row(
+              DetailRow(
                   'Money goes to',
                   switch (d.mode) {
                     'reimburse' => 'You (paying you back)',
                     _ => '${d.payee}\'s Pointy balance',
                   }),
-              if (d.payee.isNotEmpty && d.mode == 'reimburse') _row('Paid to', d.payee),
-              _row('Category', categoryLabel(d.category)),
-              _row('Split', shares.length <= 1 ? 'Just you' : '${shares.length} ways, your part ${formatPaise(mine)}'),
-              _row('Wallet after', formatPaise(d.trip.balancePaise - d.amountPaise)),
+              if (d.payee.isNotEmpty && d.mode == 'reimburse') DetailRow('Paid to', d.payee),
+              DetailRow('Category', categoryLabel(d.category)),
+              DetailRow('Split', shares.length <= 1 ? 'Just you' : '${shares.length} ways, your part ${formatPaise(mine)}'),
+              DetailRow('Wallet after', formatPaise(d.trip.balancePaise - d.amountPaise)),
             ],
           ),
         ),
       ],
     );
   }
-
-  Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.detail())),
-            Text(value, style: AppText.body(weight: FontWeight.w600)),
-          ],
-        ),
-      );
 }
 
 enum _BudgetChoice { payAnyway, raised }
@@ -676,9 +667,9 @@ class _BudgetCheckScreenState extends State<_BudgetCheckScreen> {
           SurfaceCard(
             child: Column(
               children: [
-                _row('Used so far', formatPaise(c.usedPaise)),
-                _row('This payment', formatPaise(c.thisPaymentPaise)),
-                _row(c.leftAfterPaise < 0 ? 'Over the budget' : 'Left after', formatPaise(c.leftAfterPaise.abs())),
+                DetailRow('Used so far', formatPaise(c.usedPaise)),
+                DetailRow('This payment', formatPaise(c.thisPaymentPaise)),
+                DetailRow(c.leftAfterPaise < 0 ? 'Over the budget' : 'Left after', formatPaise(c.leftAfterPaise.abs())),
               ],
             ),
           ),
@@ -691,9 +682,4 @@ class _BudgetCheckScreenState extends State<_BudgetCheckScreen> {
       ),
     );
   }
-
-  Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [Expanded(child: Text(label, style: AppText.detail())), Text(value, style: AppText.body(weight: FontWeight.w600))]),
-      );
 }

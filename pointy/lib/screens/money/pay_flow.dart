@@ -8,6 +8,7 @@ import '../../theme.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/amount_field.dart';
+import '../../widgets/detail_row.dart';
 import '../../widgets/flow_scaffold.dart';
 import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
@@ -279,8 +280,8 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
             SurfaceCard(
               child: Column(
                 children: [
-                  _row('Your balance', formatPaise(me.personalBalancePaise)),
-                  _row('After paying', formatPaise(after), color: short ? AppColors.error : null),
+                  DetailRow('Your balance', formatPaise(me.personalBalancePaise)),
+                  DetailRow('After paying', formatPaise(after), color: short ? AppColors.error : null),
                 ],
               ),
             ),
@@ -295,14 +296,4 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       },
     );
   }
-
-  Widget _row(String label, String value, {Color? color}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.detail())),
-            Text(value, style: AppText.body(weight: FontWeight.w600, color: color ?? AppColors.ink)),
-          ],
-        ),
-      );
 }
