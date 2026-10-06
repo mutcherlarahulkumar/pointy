@@ -46,6 +46,7 @@ type Service struct {
 	sessions      map[string]string // token hash -> user id
 	phones        map[string]string // phone -> user id
 	failedLogins  map[string][]time.Time
+	failedCodes   map[string][]time.Time // family link id -> wrong parent codes
 	ledger        *domain.Ledger
 	users         map[string]*domain.User
 	trips         map[string]*domain.Trip
@@ -92,7 +93,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
+		failedLogins: map[string][]time.Time{}, failedCodes: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
 	}
 }
 
@@ -466,6 +467,14 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 			return d, nil
 		}
 		return nil, domain.Conflict("capture_in_progress", "this payment is already being completed", nil)
+	}
+	if s.isChildL(d.UserID) {
+		// Started before the account became a child account: PayPal is
+		// for adults, and it would skip the small-wallet caps. Never
+		// captured, so nothing is charged.
+		_ = s.commitL() // a child who just turned 18
+		s.mu.Unlock()
+		return nil, childOnly("Adding money with PayPal")
 	}
 	d.Status = "capturing"
 	s.mu.Unlock()
