@@ -344,6 +344,117 @@ func TestSplitBillLongDescription(t *testing.T) {
 	}
 }
 
+// Amount edges on every way money moves between people.
+func TestAmountEdges(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	topUp(t, s, a, 100000)
+	topUp(t, s, a, 100000)
+	must[Me](t)(s.SetPayPalEmail(a, "asha@example.com"))
+	for _, amt := range []Paise{0, -1, -MaxAmount, MaxAmount + 1, 1 << 62} {
+		if _, err := s.PayPersonal(a, ExpenseInput{Description: "x", Amount: amt, PayeeUserID: d}); code(err) != "invalid" {
+			t.Fatalf("pay %d: %v", amt, err)
+		}
+		if _, err := s.RequestMoney(d, MoneyRequestInput{PayerID: a, Amount: amt}); code(err) != "invalid" {
+			t.Fatalf("request %d: %v", amt, err)
+		}
+		if _, err := s.Withdraw(ctx, a, amt); code(err) != "invalid" {
+			t.Fatalf("withdraw %d: %v", amt, err)
+		}
+		if _, err := s.StartTopUp(ctx, a, amt); code(err) != "invalid" {
+			t.Fatalf("top up %d: %v", amt, err)
+		}
+		if _, err := s.SplitBill(a, SplitBillInput{Description: "x", Amount: amt, Participants: []domain.SplitInput{{UserID: d}}}); code(err) != "invalid" {
+			t.Fatalf("split %d: %v", amt, err)
+		}
+	}
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "x", Amount: 1, PayeeUserID: d}))
+	must[*domain.Expense](t)(s.PayPersonal(a, ExpenseInput{Description: "x", Amount: MaxAmount, PayeeUserID: d}))
+	if balance(s, d) != MaxAmount+1 {
+		t.Fatalf("Dev %d", balance(s, d))
+	}
+	// ₹1 between three people: 34 + 33 + 33 paise.
+	m := register(t, s, "Meera", "9988776655")
+	res := must[SplitBillResult](t)(s.SplitBill(a, SplitBillInput{Description: "Toffee", Amount: 100, Participants: []domain.SplitInput{{UserID: a}, {UserID: d}, {UserID: m}}}))
+	if res.Shares[0].Amount+res.Shares[1].Amount+res.Shares[2].Amount != 100 || len(res.Requests) != 2 {
+		t.Fatalf("shares %+v", res.Shares)
+	}
+	// One paisa between two: only one of them owes anything.
+	res = must[SplitBillResult](t)(s.SplitBill(a, SplitBillInput{Description: "Toffee", Amount: 1, Participants: []domain.SplitInput{{UserID: d}, {UserID: m}}}))
+	if len(res.Requests) != 1 || res.Requests[0].Amount != 1 {
+		t.Fatalf("1 paisa: %+v", res.Requests)
+	}
+	checkBooks(t, s)
+}
+
+// Requests: pay twice, pay after decline, decline by someone else, ask
+// yourself, ask someone unknown, pay without the money.
+func TestMoneyRequestEdges(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	m := register(t, s, "Meera", "9988776655")
+	if _, err := s.RequestMoney(a, MoneyRequestInput{PayerID: a, Amount: 100}); code(err) != "invalid" {
+		t.Fatalf("ask yourself: %v", err)
+	}
+	if _, err := s.RequestMoney(a, MoneyRequestInput{PayerID: "u_nobody", Amount: 100}); code(err) != "invalid" {
+		t.Fatalf("ask nobody: %v", err)
+	}
+	r := must[MoneyRequestView](t)(s.RequestMoney(a, MoneyRequestInput{PayerID: d, Amount: 100}))
+	if _, err := s.PayMoneyRequest(d, r.ID); code(err) != "insufficient_balance" {
+		t.Fatalf("pay without money: %v", err)
+	}
+	if _, err := s.DeclineMoneyRequest(m, r.ID); code(err) != "not_found" {
+		t.Fatalf("decline by a stranger: %v", err)
+	}
+	if _, err := s.PayMoneyRequest(m, r.ID); code(err) != "not_found" {
+		t.Fatalf("pay by a stranger: %v", err)
+	}
+	must[MoneyRequestView](t)(s.DeclineMoneyRequest(d, r.ID))
+	topUp(t, s, d, 10)
+	if _, err := s.PayMoneyRequest(d, r.ID); code(err) != "already_closed" {
+		t.Fatalf("pay after decline: %v", err)
+	}
+	r2 := must[MoneyRequestView](t)(s.RequestMoney(a, MoneyRequestInput{PayerID: d, Amount: 100}))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = s.PayMoneyRequest(d, r2.ID) }()
+	}
+	wg.Wait()
+	if balance(s, a) != 100 || balance(s, d) != 900 {
+		t.Fatalf("request paid more than once: %d %d", balance(s, a), balance(s, d))
+	}
+	checkBooks(t, s)
+}
+
+// The return page, the webhook and the app may all capture at once.
+func TestParallelCapturesCreditOnce(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	dep := must[*domain.Deposit](t)(s.StartTopUp(ctx, a, domain.Rupees(700)))
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = s.HandleWebhook(ctx, "CHECKOUT.ORDER.APPROVED", dep.OrderID)
+			} else {
+				_, _ = s.CaptureDeposit(ctx, dep.OrderID)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if b := balance(s, a); b != domain.Rupees(700) {
+		t.Fatalf("balance %d", b)
+	}
+	checkBooks(t, s)
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {
