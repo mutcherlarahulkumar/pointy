@@ -219,6 +219,10 @@ class ApprovalCodeScreen extends StatefulWidget {
   // Keys fetched this session, so the PIN is asked once per child.
   static final _keys = <String, Totp>{};
 
+  /// Forgets every fetched key, so the next person on this phone cannot
+  /// see a child's codes. Called on sign-out.
+  static void forgetKeys() => _keys.clear();
+
   @override
   State<ApprovalCodeScreen> createState() => _ApprovalCodeScreenState();
 }

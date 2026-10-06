@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'family_mode.dart';
+import 'screens/family/child_detail.dart';
 
 /// Remembers who is signed in on this phone. The token is kept in the app's
 /// private storage, so the person stays signed in between launches.
@@ -53,6 +54,7 @@ class Session {
     }
     api.token = null;
     api.userId = '';
+    ApprovalCodeScreen.forgetKeys();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_key);

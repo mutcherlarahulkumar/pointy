@@ -44,6 +44,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   final List<_Message> _messages = [];
   bool _busy = false;
   String? _confirmingPlanId;
+  final _confirmKeys = <String, SubmitKey>{};
 
   List<String> get _quickPrompts {
     final due = widget.trip.start.subtract(const Duration(days: 2));
@@ -102,8 +103,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Future<void> _confirm(Plan plan) async {
     setState(() => _confirmingPlanId = plan.id);
     try {
-      // One key per plan: confirming the same plan twice cannot send twice.
-      final sent = await api.confirmPlan(widget.trip.id, plan.id, key: 'confirm-${plan.id}');
+      // One key per plan: confirming the same plan twice cannot send twice,
+      // but a refused try gets a fresh key so it is not replayed forever.
+      final key = _confirmKeys.putIfAbsent(plan.id, SubmitKey.new);
+      final int sent;
+      try {
+        sent = await api.confirmPlan(widget.trip.id, plan.id, key: key.forRequest(plan.id));
+      } catch (e) {
+        key.failed(e);
+        rethrow;
+      }
       if (!mounted) return;
       setState(() {
         final i = _messages.indexWhere((m) => m.plan?.id == plan.id);
