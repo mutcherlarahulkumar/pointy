@@ -52,7 +52,7 @@ class _TripInsights extends StatefulWidget {
 
 class _TripInsightsState extends State<_TripInsights> with ReloadWhenShown {
   @override
-  void reloadQuietly() => setState(() => _data = _load());
+  void reloadQuietly() => setState(() { _data = _load(); });
 
   late Future<(Trip, Insights)?> _data = _load();
 
@@ -72,7 +72,7 @@ class _TripInsightsState extends State<_TripInsights> with ReloadWhenShown {
   Widget build(BuildContext context) {
     return AsyncView<(Trip, Insights)?>(
       future: _data,
-      onRetry: () => setState(() => _data = _load()),
+      onRetry: () => setState(() { _data = _load(); }),
       builder: (context, data) {
         if (data == null) return const ErrorView(message: 'No trips yet.');
         final (trip, i) = data;
@@ -115,7 +115,7 @@ class _PersonalInsights extends StatefulWidget {
 
 class _PersonalInsightsState extends State<_PersonalInsights> with ReloadWhenShown {
   @override
-  void reloadQuietly() => setState(() => _history = api.history());
+  void reloadQuietly() => setState(() { _history = api.history(); });
 
   late Future<List<HistoryItem>> _history = api.history();
 
@@ -123,7 +123,7 @@ class _PersonalInsightsState extends State<_PersonalInsights> with ReloadWhenSho
   Widget build(BuildContext context) {
     return AsyncView<List<HistoryItem>>(
       future: _history,
-      onRetry: () => setState(() => _history = api.history()),
+      onRetry: () => setState(() { _history = api.history(); }),
       builder: (context, history) {
         // Your own money: personal payments plus your part of trip payments.
         final payments = history.where((h) => h.kind == 'payment').toList();

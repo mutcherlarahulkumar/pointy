@@ -13,8 +13,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/http"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -33,6 +34,10 @@ const LowShare = Paise(100000) // ₹1,000
 // MaxAmount caps one payment or top-up, to catch typos.
 const MaxAmount = Paise(10000000) // ₹1,00,000
 
+// MaxBudget caps one category's trip budget, so budget maths never
+// overflows.
+const MaxBudget = 1000 * MaxAmount // ₹10,00,00,000
+
 // IST is India Standard Time. Times are shown and bucketed in it.
 var IST = time.FixedZone("IST", 5*3600+1800)
 
@@ -46,6 +51,7 @@ type Service struct {
 	sessions      map[string]string // token hash -> user id
 	phones        map[string]string // phone -> user id
 	failedLogins  map[string][]time.Time
+	failedCodes   map[string][]time.Time // family link id -> wrong parent codes
 	ledger        *domain.Ledger
 	users         map[string]*domain.User
 	trips         map[string]*domain.Trip
@@ -62,10 +68,6 @@ type Service struct {
 	groupBuys     []*domain.GroupBuy               // purchases a trip's agent found, bought together
 	familyLinks   []*domain.FamilyLink             // parent and child accounts
 	approvals     []*domain.Approval               // child payments waiting for a parent
-	// holds is money set aside while a PayPal payout is being sent, so it
-	// cannot be spent twice in the meantime. Never stored: a payout either
-	// finishes (and is posted) or is released.
-	holds map[string]Paise
 
 	// ai is optional: without it summaries and the assistant use rules.
 	ai          ai.Assistant
@@ -92,7 +94,7 @@ func New(pp paypal.Client, now func() time.Time, store Store) *Service {
 		users: map[string]*domain.User{}, trips: map[string]*domain.Trip{},
 		deposits: map[string]*domain.Deposit{}, requests: map[string]*domain.DepositRequest{},
 		plans: map[string]*domain.Plan{}, sessions: map[string]string{}, phones: map[string]string{},
-		failedLogins: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{}, holds: map[string]Paise{},
+		failedLogins: map[string][]time.Time{}, failedCodes: map[string][]time.Time{}, aiSummaries: map[string]cachedSummary{}, chats: map[string][]*domain.ChatMessage{},
 	}
 }
 
@@ -107,10 +109,6 @@ func (s *Service) postL(e domain.Entry) error {
 	}
 	s.track(e)
 	return nil
-}
-
-func rail(err error) *domain.Error {
-	return &domain.Error{Status: http.StatusBadGateway, Code: "paypal_error", Message: err.Error()}
 }
 
 func (s *Service) tripL(tripID, userID string) (*domain.Trip, error) {
@@ -146,6 +144,14 @@ func (s *Service) name(userID string) string {
 		return u.Name
 	}
 	return "Someone"
+}
+
+// clip cuts s to at most n letters, never through the middle of one.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return strings.TrimSpace(string(r[:n]))
+	}
+	return s
 }
 
 func checkAmount(a Paise) error {
@@ -246,10 +252,25 @@ func (s *Service) currentTripL(userID string, at time.Time) *domain.Trip {
 // calls: an approved checkout is captured.
 func (s *Service) HandleWebhook(ctx context.Context, eventType, resourceID string) error {
 	if eventType == "CHECKOUT.ORDER.APPROVED" {
+		// A group-buy order is held (AUTHORIZE), not captured: the money is
+		// taken only when everyone is in.
+		if s.IsGroupBuyOrder(resourceID) {
+			_, err := s.AuthorizeGroupBuyOrder(ctx, resourceID, "")
+			return err
+		}
 		_, err := s.CaptureDeposit(ctx, resourceID)
 		return err
 	}
 	return nil // other events are acknowledged and ignored
+}
+
+// Marshal turns a value the service returned into JSON while holding the
+// state lock. Returned views share objects with the live state, so they
+// must not be read while another request changes them.
+func (s *Service) Marshal(v any) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return json.Marshal(v)
 }
 
 // ---------------------------------------------------------------- trips
@@ -344,7 +365,7 @@ func (s *Service) CreateTrip(userID string, in CreateTripInput) (TripView, error
 	}
 	budgets := map[domain.Category]Paise{}
 	for c, v := range in.Budgets {
-		if !domain.ValidCategory(c) || v < 0 {
+		if !domain.ValidCategory(c) || v < 0 || v > MaxBudget {
 			return TripView{}, domain.Invalid("bad budget for %q", c)
 		}
 		budgets[c] = v
@@ -378,6 +399,7 @@ func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, err
 	if t.OrganiserID != userID {
 		return TripView{}, domain.Forbidden("only the organiser can add people")
 	}
+	// Check everyone first: a refused call must add nobody.
 	for _, m := range ids {
 		if _, ok := s.users[m]; !ok {
 			return TripView{}, domain.Invalid("unknown member %q", m)
@@ -385,6 +407,8 @@ func (s *Service) AddMembers(tripID, userID string, ids []string) (TripView, err
 		if s.isChildL(m) {
 			return TripView{}, domain.Conflict("child_account", s.name(m)+" has a child account, which cannot join trip wallets", nil)
 		}
+	}
+	for _, m := range ids {
 		if !t.HasMember(m) {
 			t.Members = append(t.Members, m)
 			s.alertL(t.ID, m, "trip", s.name(userID)+" added you to "+t.Name, "Open the trip to see the plan")
@@ -427,7 +451,7 @@ func (s *Service) startOrder(ctx context.Context, tripID, userID string, amount 
 	id := s.idL("dep")
 	o, perr := s.pp.CreateOrder(ctx, id, amount, what)
 	if perr != nil {
-		return nil, rail(perr)
+		return nil, paypalErr(perr)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -467,6 +491,20 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		}
 		return nil, domain.Conflict("capture_in_progress", "this payment is already being completed", nil)
 	}
+	if t := s.trips[d.TripID]; d.TripID != "" && t != nil && t.Status != "open" {
+		// An old trip order approved after the trip was settled: its money
+		// would land in a share nobody can be refunded from.
+		s.mu.Unlock()
+		return nil, domain.Conflict("trip_closed", "this trip is "+t.Status, nil)
+	}
+	if s.isChildL(d.UserID) {
+		// Started before the account became a child account: PayPal is
+		// for adults, and it would skip the small-wallet caps. Never
+		// captured, so nothing is charged.
+		_ = s.commitL() // a child who just turned 18
+		s.mu.Unlock()
+		return nil, childOnly("Adding money with PayPal")
+	}
 	d.Status = "capturing"
 	s.mu.Unlock()
 
@@ -474,9 +512,26 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A failed save elsewhere may have reloaded the state while PayPal was
+	// called: carry on with the deposit as it is now.
+	if cur, ok := s.deposits[orderID]; ok {
+		d = cur
+	}
+	// The ledger is the record: never credit the same order twice.
+	if s.ledgerHasRefL(orderID, "topup", "deposit") {
+		if d.Status != "captured" {
+			d.Status = "captured"
+			s.track(d)
+			if err := s.commitL(); err != nil {
+				return nil, err
+			}
+		}
+		return d, nil
+	}
 	if perr != nil {
 		d.Status = "created"
-		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", map[string]any{"paypal": perr.Error()})
+		log.Printf("capture %s: %v", orderID, perr)
+		return nil, domain.Conflict("not_approved", "PayPal has not approved this payment yet. Approve it on PayPal, then try again.", nil)
 	}
 	var err error
 	if d.TripID == "" {
@@ -505,6 +560,17 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		return nil, err
 	}
 	return d, nil
+}
+
+// ledgerHasRefL says whether an entry of one of these kinds was already
+// posted for ref (a PayPal order or payout id).
+func (s *Service) ledgerHasRefL(ref string, kinds ...string) bool {
+	for _, e := range s.ledger.Entries() {
+		if e.Ref == ref && contains(kinds, e.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 // DepositFromBalance moves money from the person's balance into their trip

@@ -7,6 +7,7 @@ import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets/ai_mark.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/chat_bubble.dart';
 import '../../widgets/tag.dart';
 
 /// The trip assistant. The organiser types an instruction, the assistant
@@ -43,6 +44,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   final List<_Message> _messages = [];
   bool _busy = false;
   String? _confirmingPlanId;
+  final _confirmKeys = <String, SubmitKey>{};
 
   List<String> get _quickPrompts {
     final due = widget.trip.start.subtract(const Duration(days: 2));
@@ -84,13 +86,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _toEnd();
     try {
       final plan = await api.draftPlan(widget.trip.id, text.trim());
+      if (!mounted) return; // left while the assistant was thinking
       setState(() {
         // The model's reply comes first, like a chat, then the plan to approve.
         if (plan.note.isNotEmpty) _messages.add(_Message.bot(plan.note));
         _messages.add(_Message.plan(plan));
       });
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.toString())));
+      if (mounted) setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
       _toEnd();
@@ -100,8 +103,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Future<void> _confirm(Plan plan) async {
     setState(() => _confirmingPlanId = plan.id);
     try {
-      // One key per plan: confirming the same plan twice cannot send twice.
-      final sent = await api.confirmPlan(widget.trip.id, plan.id, key: 'confirm-${plan.id}');
+      // One key per plan: confirming the same plan twice cannot send twice,
+      // but a refused try gets a fresh key so it is not replayed forever.
+      final key = _confirmKeys.putIfAbsent(plan.id, SubmitKey.new);
+      final int sent;
+      try {
+        sent = await api.confirmPlan(widget.trip.id, plan.id, key: key.forRequest(plan.id));
+      } catch (e) {
+        key.failed(e);
+        rethrow;
+      }
+      if (!mounted) return;
       setState(() {
         final i = _messages.indexWhere((m) => m.plan?.id == plan.id);
         if (i >= 0) _messages[i] = _Message.plan(plan.withStatus('confirmed'));
@@ -111,7 +123,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                 'I mark them paid as the money comes in.'));
       });
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.toString())));
+      if (mounted) setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _confirmingPlanId = null);
       _toEnd();
@@ -185,20 +197,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Widget _bubble(_Message m) {
     return Align(
       alignment: m.fromMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        constraints: const BoxConstraints(maxWidth: 300),
-        decoration: BoxDecoration(
-          color: m.fromMe ? AppColors.pine700 : AppColors.surface,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(m.fromMe ? 18 : 4),
-            bottomRight: Radius.circular(m.fromMe ? 4 : 18),
-          ),
-        ),
-        child: Text(m.text!, style: AppText.body(color: m.fromMe ? Colors.white : AppColors.ink)),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ChatBubble(mine: m.fromMe, child: Text(m.text!, style: ChatBubble.textStyle(m.fromMe))),
       ),
     );
   }

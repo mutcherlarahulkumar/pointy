@@ -31,6 +31,35 @@ String defaultBaseUrl() {
 /// for retries of that same attempt, so a double tap cannot pay twice.
 String newIdempotencyKey() => const Uuid().v4();
 
+/// The Idempotency-Key for one screen's submit button.
+///
+/// The same request sent again (a double tap, a retry after the connection
+/// dropped) reuses its key, so it can only happen once. A changed request
+/// gets a fresh key (the server refuses one key for two different bodies),
+/// and so does any try after the server answered with an error (4xx): it
+/// keeps that answer under the key and would only repeat it.
+class SubmitKey {
+  String _key = newIdempotencyKey();
+  String? _sent;
+
+  /// The key for sending [request] (the body, or whatever identifies it).
+  String forRequest(Object? request) {
+    final text = jsonEncode(request);
+    if (_sent != null && _sent != text) _key = newIdempotencyKey();
+    _sent = text;
+    return _key;
+  }
+
+  /// Call when a send failed. Network errors and 5xx keep the key, so a
+  /// retry cannot pay twice; answers the server kept (4xx) do not.
+  void failed(Object error) {
+    if (error is ApiException && error.status >= 400 && error.status < 500) {
+      _key = newIdempotencyKey();
+      _sent = null;
+    }
+  }
+}
+
 /// One class that knows every endpoint. Screens call these methods and get
 /// model objects back.
 class ApiClient {
@@ -75,10 +104,15 @@ class ApiClient {
     }
     if (res.statusCode >= 400) {
       final err = (decoded is Map ? decoded['error'] : null) as Map<String, dynamic>?;
+      final code = (err?['code'] as String?) ?? 'error';
       final e = ApiException(
         res.statusCode,
-        (err?['code'] as String?) ?? 'error',
-        (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode}). Please try again.',
+        code,
+        // The key mix-up is the app's to fix (screens make a new key after
+        // this error); the person only needs to try again.
+        code == 'idempotency_key_reused'
+            ? 'That did not go through. Please try again.'
+            : (err?['message'] as String?) ?? 'Something went wrong (${res.statusCode}). Please try again.',
         err?['details'] as Map<String, dynamic>?,
       );
       if (e.code == 'signed_out') onSignedOut?.call();
@@ -179,7 +213,8 @@ class ApiClient {
       await _obj('POST', '/api/trips/$tripId/deposits', body: {'amount_paise': amountPaise}, key: key));
   // Pointy Parenting
   Future<FamilyView> family() async => FamilyView.fromJson(await _obj('GET', '/api/family'));
-  Future<FamilyInvite> inviteChild(Map<String, dynamic> body) async => FamilyInvite.fromJson(await _obj('POST', '/api/family/invites', body: body));
+  Future<FamilyInvite> inviteChild(Map<String, dynamic> body, {required String key}) async =>
+      FamilyInvite.fromJson(await _obj('POST', '/api/family/invites', body: body, key: key));
   Future<ChildView> acceptFamilyInvite(String linkId, String code, String pin) async =>
       ChildView.fromJson(await _obj('POST', '/api/family/invites/$linkId/accept', body: {'code': code, 'pin': pin}));
   Future<void> declineFamilyInvite(String linkId) async => _send('POST', '/api/family/invites/$linkId/decline');
@@ -190,10 +225,11 @@ class ApiClient {
       (await _arr('GET', '/api/family/children/$childId/activity')).map(HistoryItem.fromJson).toList();
   Future<String> childCodeKey(String childId, String pin) async =>
       ((await _obj('POST', '/api/family/children/$childId/code-key', body: {'pin': pin}))['secret'] as String?) ?? '';
-  Future<Approval> askApproval(String payeeId, int amountPaise, String note) async =>
-      Approval.fromJson(await _obj('POST', '/api/family/approvals', body: {'payee_id': payeeId, 'amount_paise': amountPaise, 'note': note}));
-  Future<Approval> decideApproval(String id, {required bool approve, String pin = ''}) async =>
-      Approval.fromJson(await _obj('POST', '/api/family/approvals/$id/${approve ? 'approve' : 'decline'}', body: {'pin': pin}));
+  Future<Approval> askApproval(String payeeId, int amountPaise, String note, {required String key}) async => Approval.fromJson(
+      await _obj('POST', '/api/family/approvals', body: {'payee_id': payeeId, 'amount_paise': amountPaise, 'note': note}, key: key));
+  /// Approving pays the child's payment, so it carries a key like any payment.
+  Future<Approval> decideApproval(String id, {required bool approve, String pin = '', required String key}) async => Approval.fromJson(
+      await _obj('POST', '/api/family/approvals/$id/${approve ? 'approve' : 'decline'}', body: {'pin': pin}, key: key));
 
   // The trip's shopping agent and group purchases
   Future<AgentAnswer> shopAgent(String tripId, String text) async =>

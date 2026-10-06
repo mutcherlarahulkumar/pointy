@@ -8,6 +8,7 @@ import '../../theme.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/amount_field.dart';
+import '../../widgets/detail_row.dart';
 import '../../widgets/flow_scaffold.dart';
 import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
@@ -111,22 +112,24 @@ class PayConfirmScreen extends StatefulWidget {
 
 class _PayConfirmScreenState extends State<PayConfirmScreen> {
   late Future<Me> _me = api.me();
-  // One key for this attempt: a double tap cannot pay twice.
-  String _key = newIdempotencyKey();
+  // One key per payment: a double tap or a retry cannot pay twice.
+  final _key = SubmitKey();
   bool _busy = false;
+  final _askKey = SubmitKey();
 
   Future<void> _pay({String parentCode = ''}) async {
     // A parent's code is the OK for this payment; the PIN was asked already.
     if (parentCode.isEmpty && !await confirmPayment(context, 'Pay ${formatPaise(widget.amountPaise)} to ${widget.person.name}')) return;
     setState(() => _busy = true);
     try {
-      final e = await api.payPerson({
+      final body = {
         'payee_user_id': widget.person.id,
         'amount_paise': widget.amountPaise,
         'description': widget.note.isEmpty ? 'Payment' : widget.note,
         'category': 'other',
         if (parentCode.isNotEmpty) 'parent_code': parentCode,
-      }, key: _key);
+      };
+      final e = await api.payPerson(body, key: _key.forRequest(body));
       if (!mounted) return;
       // Close the flow and show the result on top of where it started.
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
@@ -139,12 +142,12 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
         ),
       ));
     } on ApiException catch (e) {
-      _key = newIdempotencyKey(); // the server stored this answer under the old key
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       if (e.code == 'needs_parent') return _askParent(e);
       showError(context, e);
-      if (e.code == 'insufficient_balance') setState(() => _me = api.me());
+      if (e.code == 'insufficient_balance') setState(() { _me = api.me(); });
     }
   }
 
@@ -181,7 +184,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       return;
     }
     try {
-      await api.askApproval(widget.person.id, widget.amountPaise, widget.note);
+      await api.askApproval(widget.person.id, widget.amountPaise, widget.note, key: _askKey.forRequest(null));
       if (!mounted) return;
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
       nav.push(MaterialPageRoute(
@@ -193,7 +196,11 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
         ),
       ));
     } catch (err) {
-      if (mounted) showError(context, err);
+      _askKey.failed(err);
+      if (!mounted) return;
+      showError(context, err is ApiException && err.code == 'too_many_asks'
+          ? '$parent has 3 asks to answer already. Wait for an answer, then ask again.'
+          : err);
     }
   }
 
@@ -224,7 +231,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   Widget build(BuildContext context) {
     return AsyncView<Me>(
       future: _me,
-      onRetry: () => setState(() => _me = api.me()),
+      onRetry: () => setState(() { _me = api.me(); }),
       builder: (context, me) {
         final after = me.personalBalancePaise - widget.amountPaise;
         final short = after < 0;
@@ -241,7 +248,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
               : short
               ? () async {
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TopUpScreen(suggestPaise: -after)));
-                  setState(() => _me = api.me());
+                  setState(() { _me = api.me(); });
                 }
               : _pay,
           footer: Text.rich(
@@ -273,8 +280,8 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
             SurfaceCard(
               child: Column(
                 children: [
-                  _row('Your balance', formatPaise(me.personalBalancePaise)),
-                  _row('After paying', formatPaise(after), color: short ? AppColors.error : null),
+                  DetailRow('Your balance', formatPaise(me.personalBalancePaise)),
+                  DetailRow('After paying', formatPaise(after), color: short ? AppColors.error : null),
                 ],
               ),
             ),
@@ -289,14 +296,4 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       },
     );
   }
-
-  Widget _row(String label, String value, {Color? color}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.detail())),
-            Text(value, style: AppText.body(weight: FontWeight.w600, color: color ?? AppColors.ink)),
-          ],
-        ),
-      );
 }

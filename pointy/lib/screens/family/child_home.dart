@@ -36,7 +36,7 @@ class _ChildHomeState extends State<ChildHome> {
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    if (mounted) setState(() => _data = _load());
+    if (mounted) setState(() { _data = _load(); });
   }
 
   @override
@@ -46,13 +46,13 @@ class _ChildHomeState extends State<ChildHome> {
       body: SafeArea(
         child: AsyncView<(Me, FamilyView, List<HistoryItem>)>(
           future: _data,
-          onRetry: () => setState(() => _data = _load()),
+          onRetry: () => setState(() { _data = _load(); }),
           builder: (context, data) {
             final (me, f, history) = data;
             final c = f.me;
             if (c == null) return const SizedBox.shrink(); // just unlinked: the adult app takes over
             return RefreshIndicator(
-              onRefresh: () async => setState(() => _data = _load()),
+              onRefresh: () async => setState(() { _data = _load(); }),
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [

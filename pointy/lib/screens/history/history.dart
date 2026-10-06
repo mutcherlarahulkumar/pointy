@@ -30,7 +30,7 @@ class _HistoryScreenState extends State<HistoryScreen> with ReloadWhenShown {
   late Future<List<HistoryItem>> _history = api.history();
   String _filter = 'all'; // all, personal, trip
 
-  void _reload() => setState(() => _history = api.history());
+  void _reload() => setState(() { _history = api.history(); });
 
   @override
   Widget build(BuildContext context) {

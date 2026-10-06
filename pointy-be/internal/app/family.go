@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"net/http"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ var (
 	inviteWindow     = 10 * time.Minute
 	approvalWindow   = 30 * time.Minute
 	maxCodeAttempts  = 5
+	codeLockout      = 15 * time.Minute // after maxCodeAttempts wrong parent codes
 	totpStep         = int64(30)
 	familyAdultYears = 18
 )
@@ -159,10 +161,25 @@ func (s *Service) childSendCheckL(from string, in ExpenseInput) error {
 		return nil
 	}
 	if code := strings.TrimSpace(in.ParentCode); code != "" {
+		// Wrong codes are counted, so a 6-digit code cannot be guessed by
+		// trying them all.
+		recent := s.failedCodes[l.ID][:0:0]
+		for _, at := range s.failedCodes[l.ID] {
+			if now.Sub(at) < codeLockout {
+				recent = append(recent, at)
+			}
+		}
+		s.failedCodes[l.ID] = recent
+		if len(recent) >= maxCodeAttempts {
+			return &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_codes", Message: "too many wrong codes; try again in 15 minutes or ask " + s.name(l.ParentID) + " to approve it"}
+		}
 		if s.useTOTPL(l, code) {
+			delete(s.failedCodes, l.ID)
 			return nil
 		}
-		return domain.Conflict("wrong_parent_code", "that code is not right or has been used; ask "+s.name(l.ParentID)+" for the code shown now", nil)
+		s.failedCodes[l.ID] = append(recent, now)
+		return domain.Conflict("wrong_parent_code", "that code is not right or has been used; ask "+s.name(l.ParentID)+" for the code shown now",
+			map[string]int{"attempts_left": max(0, maxCodeAttempts-len(s.failedCodes[l.ID]))})
 	}
 	return domain.Conflict("needs_parent", "this is over your "+reason+" limit. Ask "+s.name(l.ParentID)+" to approve it", map[string]any{
 		"reason": reason, "parent": s.name(l.ParentID),
@@ -284,20 +301,26 @@ type FamilyView struct {
 func (s *Service) childViewL(l *domain.FamilyLink) ChildView {
 	now := s.now()
 	v := ChildView{LinkID: l.ID, Status: l.Status, Child: s.users[l.ChildID].Public(), Parent: s.users[l.ParentID].Public(), BirthDate: l.BirthDate,
-		Balance: s.ledger.Owed(domain.PersonalAccount(l.ChildID)), DailyLimit: l.DailyLimit, MonthlyLimit: l.MonthlyLimit,
-		SpentToday: s.spentByL(l.ChildID, dayStart(now)), SpentMonth: s.spentByL(l.ChildID, monthStart(now)), MaxPayment: ChildMaxPayment,
+		DailyLimit: l.DailyLimit, MonthlyLimit: l.MonthlyLimit, MaxPayment: ChildMaxPayment,
 		TermsVersion: l.TermsVersion, ConsentAt: l.ParentConsentAt, AcceptedAt: l.ChildAcceptedAt}
 	v.Age, _ = ageOn(l.BirthDate, now)
+	if l.Status == "invited" {
+		exp := l.CodeExpires
+		v.CodeExpires = &exp
+	}
+	if l.Status != "active" {
+		// Anyone can invite any number: until the child says yes, the
+		// inviter sees nothing of the account (DPDP Act s.9(1)).
+		return v
+	}
+	v.Balance = s.ledger.Owed(domain.PersonalAccount(l.ChildID))
+	v.SpentToday, v.SpentMonth = s.spentByL(l.ChildID, dayStart(now)), s.spentByL(l.ChildID, monthStart(now))
 	v.DailyLeft, v.MonthlyLeft = max(0, l.DailyLimit-v.SpentToday), max(0, l.MonthlyLimit-v.SpentMonth)
 	v.ReceivedLeft = max(0, min(ChildMaxMonthIn-s.receivedByL(l.ChildID, monthStart(now)), ChildMaxBalance-v.Balance))
 	for _, a := range s.approvals {
 		if a.LinkID == l.ID && a.Status == "pending" {
 			v.Pending++
 		}
-	}
-	if l.Status == "invited" {
-		exp := l.CodeExpires
-		v.CodeExpires = &exp
 	}
 	return v
 }
@@ -449,9 +472,8 @@ func (s *Service) InviteChild(parentID string, in InviteInput) (Invite, error) {
 	case s.isParentL(childID):
 		return Invite{}, domain.Conflict("is_parent", s.name(childID)+" looks after a child account, so cannot be one", nil)
 	}
-	if err := s.childFitsL(childID); err != nil {
-		return Invite{}, err
-	}
+	// childFitsL (balance, trips, withdrawals) runs when the child accepts:
+	// telling the inviter would show them the account.
 	// A new invite replaces this parent's earlier one for the same child.
 	for _, l := range s.familyLinks {
 		if l.ParentID == parentID && l.ChildID == childID && l.Status == "invited" {
@@ -479,6 +501,13 @@ func (s *Service) InviteChild(parentID string, in InviteInput) (Invite, error) {
 func (s *Service) childFitsL(childID string) error {
 	if bal := s.ledger.Owed(domain.PersonalAccount(childID)); bal > ChildMaxBalance {
 		return domain.Conflict("child_balance_cap", s.name(childID)+" has "+INR(bal)+"; a child account can hold at most "+INR(ChildMaxBalance)+". Spend or withdraw the rest first", nil)
+	}
+	// A withdrawal PayPal may still send back would land in the child
+	// wallet past its caps.
+	for _, p := range s.payoutsForL(childID) {
+		if p.Status == "sending" || p.Status == "pending" || p.Status == "unclaimed" {
+			return domain.Conflict("child_payout_open", s.name(childID)+" has a withdrawal still on its way to PayPal; link once it has arrived", nil)
+		}
 	}
 	for _, t := range s.trips {
 		if t.Status == domain.TripOpen && t.HasMember(childID) {
@@ -516,8 +545,15 @@ func (s *Service) AcceptInvite(childID, linkID, code, pin string) (ChildView, er
 		return ChildView{}, &domain.Error{Status: 401, Code: "wrong_code", Message: "that code is not the one on your parent's phone",
 			Details: map[string]int{"attempts_left": max(0, maxCodeAttempts-l.CodeAttempts)}}
 	}
-	if s.isChildL(childID) {
+	// Things may have changed since the invite: no child with two parents,
+	// no parent who is a child, no two people each other's parent.
+	switch {
+	case s.isChildL(childID):
 		return ChildView{}, domain.Conflict("already_linked", "you already have a parent on Pointy", nil)
+	case s.isParentL(childID):
+		return ChildView{}, domain.Conflict("is_parent", "you look after a child account, so yours cannot be one", nil)
+	case s.isChildL(l.ParentID):
+		return ChildView{}, childOnly("Looking after another account")
 	}
 	if err := s.childFitsL(childID); err != nil {
 		return ChildView{}, err
@@ -646,6 +682,9 @@ type ApprovalInput struct {
 	Note    string `json:"note"`
 }
 
+// maxOpenApprovals keeps a child from flooding the parent with asks.
+const maxOpenApprovals = 3
+
 // AskApproval sends an over-limit payment to the parent's phone.
 func (s *Service) AskApproval(childID string, in ApprovalInput) (ApprovalView, error) {
 	s.mu.Lock()
@@ -666,10 +705,17 @@ func (s *Service) AskApproval(childID string, in ApprovalInput) (ApprovalView, e
 	if bal := s.availL(domain.PersonalAccount(childID)); bal < in.Amount {
 		return ApprovalView{}, domain.Conflict("insufficient_balance", "your balance is "+INR(bal), nil)
 	}
-	note := strings.TrimSpace(in.Note)
-	if len(note) > 80 {
-		note = note[:80]
+	s.expireFamilyL()
+	open := 0
+	for _, x := range s.approvals {
+		if x.ChildID == childID && x.Status == "pending" {
+			open++
+		}
 	}
+	if open >= maxOpenApprovals {
+		return ApprovalView{}, domain.Conflict("too_many_asks", "wait for an answer to the ones you have asked", nil)
+	}
+	note := clip(strings.TrimSpace(in.Note), 80)
 	now := s.now()
 	reason := "monthly"
 	if s.spentByL(childID, dayStart(now))+in.Amount > l.DailyLimit {
@@ -709,11 +755,17 @@ func (s *Service) DecideApproval(parentID, id string, approve bool, pin string) 
 	if l == nil || l.ParentID != parentID {
 		return ApprovalView{}, domain.NotFound("approval")
 	}
+	now := s.now()
+	if a.Status == "pending" && s.childLinkL(a.ChildID) != l {
+		// The link ended (the child turned 18): the parent no longer
+		// decides for this account.
+		a.Status, a.DecidedAt = "expired", &now
+		s.track(a)
+	}
 	if a.Status != "pending" {
 		_ = s.commitL()
 		return ApprovalView{}, domain.Conflict("approval_closed", "this request is "+a.Status, nil)
 	}
-	now := s.now()
 	if !approve {
 		a.Status, a.DecidedAt = "declined", &now
 		s.track(a)
@@ -724,12 +776,9 @@ func (s *Service) DecideApproval(parentID, id string, approve bool, pin string) 
 		return s.approvalViewL(a), nil
 	}
 	in := ExpenseInput{Description: firstNonEmpty(a.Note, "Approved by "+s.name(parentID)), Category: domain.Other, Amount: a.Amount, At: &now, parentApproved: true}
-	if err := s.childReceiveCheckL(a.PayeeID, a.Amount); err != nil {
-		return ApprovalView{}, err
-	}
 	e, err := s.transferL(a.ChildID, a.PayeeID, in, "")
 	if err != nil {
-		s.pending = nil
+		_ = s.commitL() // keep any expiry above; transferL changed nothing
 		return ApprovalView{}, err
 	}
 	a.Status, a.DecidedAt, a.ExpenseID = "approved", &now, e.ID

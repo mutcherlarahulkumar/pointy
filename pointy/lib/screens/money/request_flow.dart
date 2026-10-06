@@ -52,7 +52,7 @@ class RequestAmountScreen extends StatefulWidget {
 class _RequestAmountScreenState extends State<RequestAmountScreen> {
   late final _amount = TextEditingController(text: widget.amountPaise == null ? '' : paiseToInput(widget.amountPaise!));
   late final _note = TextEditingController(text: widget.note ?? '');
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   @override
@@ -65,7 +65,8 @@ class _RequestAmountScreenState extends State<RequestAmountScreen> {
   Future<void> _send(int paise) async {
     setState(() => _busy = true);
     try {
-      final r = await api.requestMoney(widget.person.id, paise, _note.text.trim(), key: _key);
+      final note = _note.text.trim();
+      final r = await api.requestMoney(widget.person.id, paise, note, key: _key.forRequest([widget.person.id, paise, note]));
       if (!mounted) return;
       // Close the flow and show the result on top of where it started.
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
@@ -79,6 +80,7 @@ class _RequestAmountScreenState extends State<RequestAmountScreen> {
         ),
       ));
     } catch (e) {
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);

@@ -41,7 +41,12 @@ class WalletCard extends StatelessWidget {
                   Icon(Icons.account_balance_wallet_outlined, color: AppColors.pine100, size: 18),
                   const SizedBox(width: 8),
                   Expanded(child: Text(title, style: AppText.detail(color: AppColors.pine100, weight: FontWeight.w600))),
-                  if (subtitle != null) Text(subtitle!, style: AppText.small(color: AppColors.pine100)),
+                  // Shares the row with the title, so large text cannot push it off the card.
+                  if (subtitle != null)
+                    Flexible(
+                      child: Text(subtitle!,
+                          maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end, style: AppText.small(color: AppColors.pine100)),
+                    ),
                 ],
               ),
               const SizedBox(height: 12),

@@ -13,6 +13,7 @@ import '../../widgets/ai_mark.dart';
 import '../../widgets/amount_field.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/detail_row.dart';
 import '../../widgets/flow_scaffold.dart';
 import '../../widgets/person_picker.dart';
 import '../../widgets/section_title.dart';
@@ -500,7 +501,7 @@ class _ReviewScreen extends StatefulWidget {
 }
 
 class _ReviewScreenState extends State<_ReviewScreen> {
-  String _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   Future<void> _pay({bool confirmOverBudget = false}) async {
@@ -510,7 +511,9 @@ class _ReviewScreenState extends State<_ReviewScreen> {
     setState(() => _busy = true);
     try {
       final loc = await coarseLocation();
-      final e = await api.addExpense(d.trip.id, d.toJson(confirmOverBudget: confirmOverBudget, lat: loc?.lat, lng: loc?.lng), key: _key);
+      final e = await api.addExpense(d.trip.id, d.toJson(confirmOverBudget: confirmOverBudget, lat: loc?.lat, lng: loc?.lng),
+          // Not the location: it can differ between a try and its retry.
+          key: _key.forRequest(d.toJson(confirmOverBudget: confirmOverBudget)));
       if (!mounted) return;
       final nav = Navigator.of(context);
       // Back to the trip, with the receipt on top.
@@ -533,7 +536,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         ),
       ));
     } on ApiException catch (e) {
-      _key = newIdempotencyKey(); // the server stored this answer under the old key
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       if (e.code == 'budget_warning' && e.details != null) {
@@ -580,32 +583,22 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         SurfaceCard(
           child: Column(
             children: [
-              _row(
+              DetailRow(
                   'Money goes to',
                   switch (d.mode) {
                     'reimburse' => 'You (paying you back)',
                     _ => '${d.payee}\'s Pointy balance',
                   }),
-              if (d.payee.isNotEmpty && d.mode == 'reimburse') _row('Paid to', d.payee),
-              _row('Category', categoryLabel(d.category)),
-              _row('Split', shares.length <= 1 ? 'Just you' : '${shares.length} ways, your part ${formatPaise(mine)}'),
-              _row('Wallet after', formatPaise(d.trip.balancePaise - d.amountPaise)),
+              if (d.payee.isNotEmpty && d.mode == 'reimburse') DetailRow('Paid to', d.payee),
+              DetailRow('Category', categoryLabel(d.category)),
+              DetailRow('Split', shares.length <= 1 ? 'Just you' : '${shares.length} ways, your part ${formatPaise(mine)}'),
+              DetailRow('Wallet after', formatPaise(d.trip.balancePaise - d.amountPaise)),
             ],
           ),
         ),
       ],
     );
   }
-
-  Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.detail())),
-            Text(value, style: AppText.body(weight: FontWeight.w600)),
-          ],
-        ),
-      );
 }
 
 enum _BudgetChoice { payAnyway, raised }
@@ -674,9 +667,9 @@ class _BudgetCheckScreenState extends State<_BudgetCheckScreen> {
           SurfaceCard(
             child: Column(
               children: [
-                _row('Used so far', formatPaise(c.usedPaise)),
-                _row('This payment', formatPaise(c.thisPaymentPaise)),
-                _row(c.leftAfterPaise < 0 ? 'Over the budget' : 'Left after', formatPaise(c.leftAfterPaise.abs())),
+                DetailRow('Used so far', formatPaise(c.usedPaise)),
+                DetailRow('This payment', formatPaise(c.thisPaymentPaise)),
+                DetailRow(c.leftAfterPaise < 0 ? 'Over the budget' : 'Left after', formatPaise(c.leftAfterPaise.abs())),
               ],
             ),
           ),
@@ -689,9 +682,4 @@ class _BudgetCheckScreenState extends State<_BudgetCheckScreen> {
       ),
     );
   }
-
-  Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [Expanded(child: Text(label, style: AppText.detail())), Text(value, style: AppText.body(weight: FontWeight.w600))]),
-      );
 }

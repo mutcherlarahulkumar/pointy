@@ -47,12 +47,10 @@ func (s *Service) Budgets(tripID, userID string) (BudgetView, error) {
 	}
 	v := BudgetView{}
 	v.Day, v.Days = t.DayOf(s.now())
-	elapsed := v.Day * 100 / v.Days
 	for _, c := range domain.Categories {
 		l := BudgetLine{Category: c, Limit: t.Budgets[c], Used: s.spentL(tripID, c)}
 		l.Percent = pct(l.Used, l.Limit)
-		// A category is ahead of pace when more of it is gone than of the trip.
-		l.AheadOfPace = l.Limit > 0 && l.Percent > elapsed+5
+		l.AheadOfPace = aheadOfPace(l.Used, l.Limit, v.Day, v.Days)
 		v.Lines = append(v.Lines, l)
 		v.Limit += l.Limit
 		v.Used += l.Used
@@ -66,7 +64,7 @@ func (s *Service) SetBudgets(tripID, userID string, in map[domain.Category]Paise
 	t, err := s.openTripL(tripID, userID)
 	if err == nil {
 		for c, v := range in {
-			if !domain.ValidCategory(c) || v < 0 {
+			if !domain.ValidCategory(c) || v < 0 || v > MaxBudget {
 				err = domain.Invalid("bad budget for %q", c)
 			}
 		}
@@ -268,10 +266,23 @@ func (s *Service) insightsL(tripID, userID string) (Insights, ai.TripFacts, erro
 		if limit := t.Budgets[c]; limit > 0 {
 			used := cat[string(c)]
 			facts.Budgets = append(facts.Budgets, ai.BudgetLine{Category: string(c), Limit: INR(limit), Used: INR(used), Percent: pct(used, limit),
-				AheadOfPace: in.Days > 0 && in.Day > 0 && int64(used)*int64(in.Days) > int64(limit)*int64(in.Day)})
+				AheadOfPace: aheadOfPace(used, limit, in.Day, in.Days)})
 		}
 	}
 	return in, facts, nil
+}
+
+// paceSlack is how many points a category may run ahead of the trip's days
+// before it is called ahead of pace.
+const paceSlack = 5
+
+// aheadOfPace says more of a budget is gone than of the trip: on day 2 of
+// 5 (40%), a category at 46% is ahead.
+func aheadOfPace(used, limit Paise, day, days int) bool {
+	if limit <= 0 || days <= 0 {
+		return false
+	}
+	return pct(used, limit) > day*100/days+paceSlack
 }
 
 func biggest(b []Bucket) string {

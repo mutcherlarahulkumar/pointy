@@ -166,6 +166,7 @@ class _LimitsScreenState extends State<_LimitsScreen> {
   late final _daily = TextEditingController(text: paiseToInput(widget.d.dailyPaise));
   late final _monthly = TextEditingController(text: paiseToInput(widget.d.monthlyPaise));
   bool _busy = false;
+  final _key = SubmitKey();
 
   static const _maxMonth = 1000000; // ₹10,000, the RBI cap for small wallets
 
@@ -183,18 +184,20 @@ class _LimitsScreenState extends State<_LimitsScreen> {
     setState(() => _busy = true);
     try {
       final b = d.birth!;
-      final inv = await api.inviteChild({
+      final body = {
         'child_phone': d.phone,
         'birth_date': '${b.year}-${b.month.toString().padLeft(2, '0')}-${b.day.toString().padLeft(2, '0')}',
         'daily_limit_paise': daily,
         'monthly_limit_paise': monthly,
         'accept_terms': familyTermsVersion,
         'pin': pin,
-      });
+      };
+      final inv = await api.inviteChild(body, key: _key.forRequest(body));
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.settings.name == 'family' || r.isFirst);
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => PairingCodeScreen(invite: inv)));
     } catch (e) {
+      _key.failed(e);
       if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -243,14 +246,15 @@ class PairingCodeScreen extends StatefulWidget {
 class _PairingCodeScreenState extends State<PairingCodeScreen> {
   // The countdown ticks every second; every three, look whether the child
   // has accepted, and celebrate when they have.
-  late final Timer _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
-  late final Timer _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check());
+  late final Timer _tick;
+  late final Timer _poll;
   bool _linked = false;
 
   @override
   void initState() {
     super.initState();
-    _poll; // start polling
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check());
   }
 
   @override
@@ -265,7 +269,7 @@ class _PairingCodeScreenState extends State<PairingCodeScreen> {
     try {
       final f = await api.family();
       final c = f.children.where((c) => c.linkId == widget.invite.child.linkId).firstOrNull;
-      if (c != null && c.isActive && mounted) {
+      if (c != null && c.isActive && mounted && !_linked) { // two slow checks can both land
         _linked = true;
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => FamilyLinkedScreen(

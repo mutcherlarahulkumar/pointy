@@ -6,6 +6,7 @@ import '../../money.dart';
 import '../../theme.dart';
 import '../../widgets/ai_card.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/detail_row.dart';
 import '../../widgets/section_title.dart';
 import '../../widgets/success.dart';
 import '../../widgets/tag.dart';
@@ -45,8 +46,8 @@ class _SettleScreenState extends State<SettleScreen> {
     setState(() => _busy = true);
     try {
       final done = await api.settle(widget.trip.id, key: _key);
-      setState(() => _settlement = Future.value(done));
       if (!mounted) return;
+      setState(() { _settlement = Future.value(done); });
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => SuccessScreen(
           title: '${widget.trip.name} is closed',
@@ -70,7 +71,7 @@ class _SettleScreenState extends State<SettleScreen> {
       appBar: AppBar(title: const Text('Settle up')),
       body: AsyncView<Settlement>(
         future: _settlement,
-        onRetry: () => setState(() => _settlement = api.settlement(widget.trip.id)),
+        onRetry: () => setState(() { _settlement = api.settlement(widget.trip.id); }),
         builder: (context, s) {
           final settled = s.status != 'open';
           return ListView(
@@ -83,9 +84,9 @@ class _SettleScreenState extends State<SettleScreen> {
               SurfaceCard(
                 child: Column(
                   children: [
-                    _row('Put in', s.depositedPaise),
-                    _row('Spent', s.spentPaise),
-                    _row('To refund', s.refundPaise, bold: true),
+                    DetailRow('Put in', formatPaise(s.depositedPaise)),
+                    DetailRow('Spent', formatPaise(s.spentPaise)),
+                    DetailRow('To refund', formatPaise(s.refundPaise), bold: true),
                   ],
                 ),
               ),
@@ -125,16 +126,6 @@ class _SettleScreenState extends State<SettleScreen> {
       ),
     );
   }
-
-  Widget _row(String label, int paise, {bool bold = false}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.detail())),
-            Text(formatPaise(paise), style: AppText.body(weight: bold ? FontWeight.w700 : FontWeight.w500)),
-          ],
-        ),
-      );
 }
 
 /// A short plain-language recap of the trip's money.

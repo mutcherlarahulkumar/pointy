@@ -64,7 +64,7 @@ func (s *Service) CheckPhone(raw string) (PhoneCheck, error) {
 	defer s.mu.Unlock()
 	out := PhoneCheck{Phone: phone}
 	if id, ok := s.phones[phone]; ok {
-		out.Exists, out.FirstName = true, strings.Fields(s.users[id].Name + " ")[0]
+		out.Exists, out.FirstName = true, firstName(s.users[id].Name)
 	}
 	return out, nil
 }
@@ -103,10 +103,8 @@ func (s *Service) Register(in RegisterInput) (AuthResult, error) {
 	s.users[u.ID], s.phones[phone] = u, u.ID
 	s.track(u)
 	token := s.newSessionL(u.ID)
-	s.alertL("", u.ID, "money", "Welcome to Pointy, "+strings.Fields(name)[0], "Add money with PayPal to start paying friends")
-	if err := s.commitL(); err != nil {
-		delete(s.users, u.ID)
-		delete(s.phones, phone)
+	s.alertL("", u.ID, "money", "Welcome to Pointy, "+firstName(name), "Add money with PayPal to start paying friends")
+	if err := s.commitL(); err != nil { // commitL put the state back
 		return AuthResult{}, err
 	}
 	return AuthResult{Token: token, User: u}, nil
@@ -153,27 +151,29 @@ func (s *Service) checkPIN(phone, pin string) (string, error) {
 			recent = append(recent, at)
 		}
 	}
-	s.failedLogins[phone] = recent
 	if len(recent) >= maxFailedPINs {
+		s.failedLogins[phone] = recent
 		s.mu.Unlock()
 		return "", &domain.Error{Status: http.StatusTooManyRequests, Code: "too_many_attempts", Message: "too many wrong PINs; try again in 15 minutes"}
 	}
 	id, ok := s.phones[phone]
-	var hash string
-	if ok {
-		hash = s.users[id].PinHash
+	if !ok {
+		// Nothing to guess, so nothing is counted: tries on numbers with no
+		// account must not fill memory.
+		delete(s.failedLogins, phone)
+		s.mu.Unlock()
+		return "", domain.NotFound("account for this number")
 	}
+	hash := s.users[id].PinHash
+	// Count this try as wrong before checking it, and take it back only if
+	// it is right: otherwise many guesses sent at once would all pass the
+	// limit above while bcrypt runs.
+	s.failedLogins[phone] = append(recent, s.now())
+	left := maxFailedPINs - len(s.failedLogins[phone])
 	s.mu.Unlock()
 
 	// bcrypt is slow on purpose, so it runs without the lock.
-	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(pin)) != nil {
-		s.mu.Lock()
-		s.failedLogins[phone] = append(s.failedLogins[phone], s.now())
-		left := maxFailedPINs - len(s.failedLogins[phone])
-		s.mu.Unlock()
-		if !ok {
-			return "", domain.NotFound("account for this number")
-		}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(pin)) != nil {
 		return "", &domain.Error{Status: http.StatusUnauthorized, Code: "wrong_pin", Message: "wrong PIN", Details: map[string]int{"attempts_left": left}}
 	}
 	s.mu.Lock()
@@ -230,4 +230,12 @@ func weakPIN(p string) bool {
 		down = down && d == -1
 	}
 	return same || up || down
+}
+
+// firstName is the first word of a name, or "" for an empty one.
+func firstName(name string) string {
+	if f := strings.Fields(name); len(f) > 0 {
+		return f[0]
+	}
+	return ""
 }

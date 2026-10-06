@@ -35,14 +35,14 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
     final all = await api.requests(widget.trip.id);
     return (me, all.firstWhere((r) => r.id == widget.request.id, orElse: () => widget.request));
   }
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   Future<void> _payFromBalance() async {
     if (!await confirmPayment(context, 'Pay ${formatPaise(widget.request.amountPaise)} into ${widget.trip.name}')) return;
     setState(() => _busy = true);
     try {
-      final r = await api.payDepositRequest(widget.request.id, key: _key);
+      final r = await api.payDepositRequest(widget.request.id, key: _key.forRequest(widget.request.id));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => SuccessScreen(
@@ -53,6 +53,7 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
         ),
       ));
     } catch (e) {
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);
@@ -103,7 +104,7 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
                             await Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => TopUpScreen(suggestPaise: r.amountPaise - me.personalBalancePaise),
                             ));
-                            if (mounted) setState(() => _data = _load());
+                            if (mounted) setState(() { _data = _load(); });
                           },
                   ),
                 ],

@@ -41,11 +41,9 @@ func (s *Service) SetPayPalEmail(userID, email string) (Me, error) {
 		s.mu.Unlock()
 		return Me{}, domain.NotFound("user")
 	}
-	old := u.PayPalEmail
 	u.PayPalEmail = strings.TrimSpace(email)
 	s.track(u)
-	if err := s.commitL(); err != nil {
-		u.PayPalEmail = old
+	if err := s.commitL(); err != nil { // commitL put the state back
 		s.mu.Unlock()
 		return Me{}, err
 	}
@@ -54,10 +52,23 @@ func (s *Service) SetPayPalEmail(userID, email string) (Me, error) {
 }
 
 // availL is what an account can spend right now: its balance less any
-// money held for a withdrawal on its way to PayPal.
+// money on its way to PayPal in a withdrawal not yet written down as sent.
 // It also leaves out trip-share money promised to an open group purchase.
 func (s *Service) availL(account string) Paise {
-	return s.ledger.Owed(account) - s.holds[account] - s.heldForBuysL(account)
+	return s.ledger.Owed(account) - s.sendingL(account) - s.heldForBuysL(account)
+}
+
+// sendingL is money in withdrawals from account that PayPal has been asked
+// to pay but that are not yet posted. It is worked out from the stored
+// payouts, so it survives a failed save and a restart: a payout PayPal may
+// already have paid can never be spent again.
+func (s *Service) sendingL(account string) (sum Paise) {
+	for _, p := range s.payouts {
+		if p.Status == "sending" && p.Kind == PayoutWithdraw && domain.PersonalAccount(p.UserID) == account {
+			sum += p.Amount
+		}
+	}
+	return sum
 }
 
 // Withdraw pays money from your Pointy balance to your PayPal account, from
@@ -85,51 +96,59 @@ func (s *Service) Withdraw(ctx context.Context, userID string, amount Paise) (*d
 		s.mu.Unlock()
 		return nil, domain.Conflict("insufficient_balance", "your balance is "+INR(avail)+"; you can withdraw up to that", map[string]any{"balance_paise": avail})
 	}
+	// Save the payout as "sending" before PayPal is asked, under the same
+	// lock as the balance check: from now on its money is held (see
+	// sendingL), even if the server stops while PayPal answers.
 	p := &domain.Payout{ID: newID("po"), UserID: userID, Kind: PayoutWithdraw, Email: u.PayPalEmail, Description: "Withdrawal from Pointy", Amount: amount, Status: "sending", CreatedAt: s.now()}
-	s.mu.Unlock()
-	if err := s.payOut(ctx, p, acc); err != nil {
-		return p, err
+	s.payouts = append(s.payouts, p)
+	s.track(p)
+	if err := s.commitL(); err != nil {
+		s.mu.Unlock()
+		return nil, err
 	}
-	return p, nil
+	s.mu.Unlock()
+	return s.payOut(ctx, p, acc)
 }
 
-// payOut sends p through PayPal. The money is held in the balance while
-// PayPal is called, so it cannot be spent twice. When PayPal accepts, one
-// balanced entry moves it out of the business account; when it refuses,
-// nothing is posted, the hold is released and the payout is kept as failed.
-func (s *Service) payOut(ctx context.Context, p *domain.Payout, acc string) error {
-	s.mu.Lock()
-	s.holds[acc] += p.Amount
-	s.mu.Unlock()
-
+// payOut sends p, already saved as "sending", through PayPal. When PayPal
+// accepts, one balanced entry moves the money out of the business account;
+// when it refuses, nothing is posted and the payout is kept as failed,
+// which lets go of the money. If that last save fails the payout stays
+// "sending" and its money held, since PayPal may have paid it.
+func (s *Service) payOut(ctx context.Context, p *domain.Payout, acc string) (*domain.Payout, error) {
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	res, perr := s.pp.SendPayout(cctx, p.ID, p.Email, p.Amount, p.Description)
 	cancel()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.holds[acc] -= p.Amount; s.holds[acc] <= 0 {
-		delete(s.holds, acc)
+	// A failed save elsewhere may have reloaded the state meanwhile.
+	for _, cur := range s.payouts {
+		if cur.ID == p.ID {
+			p = cur
+			break
+		}
+	}
+	if p.Status != "sending" {
+		return p, nil // finished already
 	}
 	if perr != nil {
-		log.Printf("payout %s to %s: %v", p.ID, p.Email, perr)
+		log.Printf("payout %s: %v", p.ID, perr)
 		p.Status, p.Error = "failed", "PayPal did not accept the payout"
-		s.payouts = append(s.payouts, p)
 		s.track(p)
 		_ = s.commitL()
-		return &domain.Error{Status: http.StatusBadGateway, Code: "paypal_error",
+		return p, &domain.Error{Status: http.StatusBadGateway, Code: "paypal_error",
 			Message: "PayPal did not accept the payout, so nothing was sent and your money is still in Pointy. Check the PayPal email, or that Payouts is on for the sandbox app."}
 	}
 	postings := []domain.Posting{{Account: acc, Debit: p.Amount}, {Account: domain.PersonalClearing, Credit: p.Amount}}
 	if err := s.postL(domain.Entry{ID: s.idL("je"), Kind: "payout", Ref: p.ID, At: s.now(), Postings: postings}); err != nil {
-		return err
+		return p, err
 	}
 	p.BatchID = res.BatchID
 	s.setPayoutStatusL(p, res.Status)
-	s.payouts = append(s.payouts, p)
 	s.track(p)
 	s.alertL("", p.UserID, "money", INR(p.Amount)+" sent to your PayPal", p.Email+" · "+payoutWords(p.Status))
-	return s.commitL()
+	return p, s.commitL()
 }
 
 // setPayoutStatusL maps PayPal's status onto the payout.
@@ -181,6 +200,14 @@ func (s *Service) RefreshPayouts(ctx context.Context, userID string) {
 			continue
 		}
 		s.mu.Lock()
+		// The state may have been reloaded while PayPal answered: use the
+		// payout as it is now.
+		for _, cur := range s.payouts {
+			if cur.ID == p.ID {
+				p = cur
+				break
+			}
+		}
 		before := p.Status
 		s.setPayoutStatusL(p, status)
 		if p.Status != before {
@@ -199,6 +226,9 @@ func (s *Service) RefreshPayouts(ctx context.Context, userID string) {
 // reversePayoutL gives back a payout PayPal returned: the opposite of its
 // payout entry.
 func (s *Service) reversePayoutL(p *domain.Payout) {
+	if s.ledgerHasRefL(p.ID, "payout_return") {
+		return // given back already
+	}
 	for _, e := range s.ledger.Entries() {
 		if (e.Kind != "payout" && e.Kind != "spend") || e.Ref != p.ID {
 			continue

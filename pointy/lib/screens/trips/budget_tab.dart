@@ -26,7 +26,7 @@ class _BudgetTabState extends State<BudgetTab> {
   late Future<Budgets> _budgets = api.budgets(widget.trip.id);
 
   void _reload() {
-    setState(() => _budgets = api.budgets(widget.trip.id));
+    setState(() { _budgets = api.budgets(widget.trip.id); });
     widget.onChanged();
   }
 
@@ -49,7 +49,7 @@ class _BudgetTabState extends State<BudgetTab> {
         m.from.category: m.from.limitPaise - m.amountPaise,
         m.to.category: m.to.limitPaise + m.amountPaise,
       });
-      _reload();
+      if (mounted) _reload();
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -57,28 +57,11 @@ class _BudgetTabState extends State<BudgetTab> {
 
   // Sets one category's limit. Only the limit changes; no money moves.
   Future<void> _edit(BudgetLine l) async {
-    final field = TextEditingController(text: l.limitPaise == 0 ? '' : paiseToInput(l.limitPaise));
-    final paise = await showDialog<int>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${categoryLabel(l.category)} budget'),
-        content: TextField(
-          controller: field,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(prefixText: '₹ ', hintText: 'For the whole trip', helperText: 'Leave empty for no budget'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, parseToPaise(field.text) ?? 0), child: const Text('Save')),
-        ],
-      ),
-    );
-    field.dispose();
+    final paise = await showDialog<int>(context: context, builder: (_) => _LimitDialog(line: l));
     if (paise == null) return;
     try {
       await api.setBudgets(widget.trip.id, {l.category: paise});
-      _reload();
+      if (mounted) _reload();
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -204,4 +187,52 @@ BudgetMove? suggestMove(Budgets b) {
   const step = 50000; // ₹500
   final amount = ((need < spare ? need : spare) ~/ step) * step;
   return amount > 0 ? BudgetMove(from, to, amount) : null;
+}
+
+/// Sets one category's limit. It owns its text field, so the field lives
+/// exactly as long as the dialog (including its closing animation).
+class _LimitDialog extends StatefulWidget {
+  const _LimitDialog({required this.line});
+  final BudgetLine line;
+
+  @override
+  State<_LimitDialog> createState() => _LimitDialogState();
+}
+
+class _LimitDialogState extends State<_LimitDialog> {
+  late final _field = TextEditingController(text: widget.line.limitPaise == 0 ? '' : paiseToInput(widget.line.limitPaise));
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = _field.text.trim().isEmpty;
+    final paise = parseToPaise(_field.text);
+    // Empty means no budget; anything else must be a real amount, so a typo
+    // never removes the budget.
+    final ok = empty || paise != null;
+    return AlertDialog(
+      title: Text('${categoryLabel(widget.line.category)} budget'),
+      content: TextField(
+        controller: _field,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          prefixText: '₹ ',
+          hintText: 'For the whole trip',
+          helperText: 'Leave empty for no budget',
+          errorText: ok ? null : 'Enter rupees, with up to two decimal places',
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: ok ? () => Navigator.pop(context, paise ?? 0) : null, child: const Text('Save')),
+      ],
+    );
+  }
 }

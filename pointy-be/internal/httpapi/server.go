@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -24,15 +25,31 @@ type server struct {
 	svc *app.Service
 	pp  paypal.Client
 
-	mu   sync.Mutex
-	idem map[string]replay // Idempotency-Key -> first response
+	mu       sync.Mutex
+	idem     map[string]*replay // Idempotency-Key -> first response
+	idemList []idemKey          // keys oldest first, to forget old answers
 }
 
+// replay is the first answer to a request with an Idempotency-Key. While
+// that request is still running, done is open and retries wait for it.
 type replay struct {
-	status int
-	body   []byte
-	at     time.Time
+	fingerprint [32]byte      // hash of the request body
+	done        chan struct{} // closed when the first request has finished
+	status      int           // 0 while running, or after a server error
+	body        []byte
+	at          time.Time
 }
+
+type idemKey struct {
+	key string
+	r   *replay
+}
+
+// Answers are kept for a day, and at most this many at once.
+const (
+	idemTTL = 24 * time.Hour
+	idemMax = 10000
+)
 
 type ctxKey struct{}
 
@@ -52,7 +69,7 @@ func bearer(r *http.Request) string {
 
 // New builds the router.
 func New(svc *app.Service, pp paypal.Client) http.Handler {
-	s := &server{svc: svc, pp: pp, idem: map[string]replay{}}
+	s := &server{svc: svc, pp: pp, idem: map[string]*replay{}}
 	mux := http.NewServeMux()
 
 	// handle registers a JSON endpoint. Unless public is true the caller
@@ -77,7 +94,16 @@ func New(svc *app.Service, pp paypal.Client) http.Handler {
 				if r.Method == http.MethodPost {
 					status = http.StatusCreated
 				}
-				writeJSON(w, status, v)
+				// Views point into live state: encode them under the
+				// service lock so a write cannot change them mid-way.
+				b, err := svc.Marshal(v)
+				if err != nil {
+					writeErr(w, err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(status)
+				_, _ = w.Write(b)
 			})
 		})
 	}
@@ -585,7 +611,12 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 
 func decode(r *http.Request, v any) error {
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil && !errors.Is(err, io.EOF) {
-		return domain.Invalid("request body is not valid JSON: %v", err)
+		// Name the field, never the server's own types.
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &te) && te.Field != "" {
+			return domain.Invalid("%s cannot be a %s", te.Field, te.Value)
+		}
+		return domain.Invalid("request body is not valid JSON")
 	}
 	return nil
 }
@@ -609,7 +640,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -632,36 +663,88 @@ func (r *recorder) Write(b []byte) (int, error) {
 
 // idempotent replays the first answer when a write is retried with the same
 // Idempotency-Key, so a double tap or a flaky network cannot pay twice.
-// Answers are kept for a day.
+// Keys belong to the signed-in caller; a retry that arrives while the first
+// request is still running waits for its answer; the same key with a
+// different body is refused. Answers are kept for a day.
 func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(http.ResponseWriter)) {
 	key := r.Header.Get("Idempotency-Key")
-	if key == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
+	// Sign-in and sign-up have no caller yet, so a key there could replay
+	// one person's token to another: they are never replayed.
+	if key == "" || userID(r) == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
 		next(w)
 		return
 	}
 	key = userID(r) + "|" + r.Method + "|" + r.URL.Path + "|" + key
-	s.mu.Lock()
-	old, seen := s.idem[key]
-	if len(s.idem) > 5000 {
-		for k, v := range s.idem {
-			if time.Since(v.at) > 24*time.Hour {
-				delete(s.idem, k)
-			}
-		}
-	}
-	s.mu.Unlock()
-	if seen {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Idempotent-Replay", "true")
-		w.WriteHeader(old.status)
-		_, _ = w.Write(old.body)
+	// Hash the body, then hand the handler the same bytes.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	if err != nil {
+		writeErr(w, domain.Invalid("unreadable body"))
 		return
 	}
-	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
-	next(rec)
-	if rec.status < 500 { // a server error may be retried for real
+	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), r.Body))
+	fp := sha256.Sum256(raw)
+
+	for {
 		s.mu.Lock()
-		s.idem[key] = replay{rec.status, rec.body.Bytes(), time.Now()}
+		s.forgetOldL()
+		old, seen := s.idem[key]
+		if !seen {
+			break // still locked
+		}
 		s.mu.Unlock()
+		if old.fingerprint != fp {
+			writeErr(w, &domain.Error{Status: http.StatusUnprocessableEntity, Code: "idempotency_key_reused",
+				Message: "this Idempotency-Key was already used for a different request; make a new key"})
+			return
+		}
+		select {
+		case <-old.done:
+		case <-r.Context().Done():
+			return
+		}
+		s.mu.Lock()
+		status, body := old.status, old.body
+		s.mu.Unlock()
+		if status == 0 {
+			continue // the first try failed with a server error: run it again
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Idempotent-Replay", "true")
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
+	}
+	mine := &replay{fingerprint: fp, done: make(chan struct{}), at: time.Now()}
+	s.idem[key] = mine
+	s.idemList = append(s.idemList, idemKey{key, mine})
+	s.mu.Unlock()
+
+	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
+	finished := false
+	defer func() { // also runs if the handler panics
+		s.mu.Lock()
+		if finished && rec.status < 500 { // a server error may be retried for real
+			mine.status, mine.body = rec.status, rec.body.Bytes()
+		} else if s.idem[key] == mine {
+			delete(s.idem, key)
+		}
+		s.mu.Unlock()
+		close(mine.done)
+	}()
+	next(rec)
+	finished = true
+}
+
+// forgetOldL drops answers older than a day, and the oldest when full.
+func (s *server) forgetOldL() {
+	n := 0
+	for n < len(s.idemList) && (len(s.idemList)-n >= idemMax || time.Since(s.idemList[n].r.at) > idemTTL) {
+		if k := s.idemList[n]; s.idem[k.key] == k.r {
+			delete(s.idem, k.key)
+		}
+		n++
+	}
+	if n > 0 {
+		s.idemList = s.idemList[n:]
 	}
 }

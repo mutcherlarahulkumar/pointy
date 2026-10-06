@@ -25,13 +25,14 @@ class _RequestsScreenState extends State<RequestsScreen> {
   late Future<List<MoneyRequest>> _list = api.moneyRequests();
   final Set<String> _busy = {};
 
-  void _reload() => setState(() => _list = api.moneyRequests());
+  void _reload() => setState(() { _list = api.moneyRequests(); });
 
   Future<void> _act(MoneyRequest r, Future<void> Function() action, String done) async {
     setState(() => _busy.add(r.id));
     try {
       await action();
-      if (mounted) showMessage(context, done);
+      if (!mounted) return; // left while it was on its way
+      showMessage(context, done);
       _reload();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -74,7 +75,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
           label: const Text('Request'),
           onPressed: () async {
             await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RequestPersonScreen()));
-            _reload();
+            if (mounted) _reload();
           },
         ),
         body: AsyncView<List<MoneyRequest>>(

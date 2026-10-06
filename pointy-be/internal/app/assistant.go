@@ -53,6 +53,7 @@ func (s *Service) SettlementPreview(tripID, userID string) (Settlement, error) {
 // Settle closes the trip: what is left in each share goes back to that
 // person's Pointy balance. Only the organiser can do it.
 func (s *Service) Settle(tripID, userID string) (Settlement, error) {
+	s.expireDue(context.Background()) // purchases whose time ran out let their holds go
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, err := s.openTripL(tripID, userID)
@@ -193,7 +194,7 @@ func (s *Service) DraftPlan(ctx context.Context, tripID, userID, instruction str
 		if v, ok := ai.ParseRupees(read.PerPerson); ok && v > 0 {
 			per = Paise(v)
 		}
-		if d, derr := time.ParseInLocation("2006-01-02", read.DueDate, IST); derr == nil && !d.Before(startOfDay(s.now())) {
+		if d, derr := time.ParseInLocation("2006-01-02", read.DueDate, IST); derr == nil && !d.Before(dayStart(s.now())) {
 			due = d
 		}
 		if picked := s.membersByNameL(t, read.MemberNames); len(picked) > 0 {
@@ -233,17 +234,12 @@ func (s *Service) membersByNameL(t *domain.Trip, names []string) []string {
 		n = strings.ToLower(strings.TrimSpace(n))
 		for _, m := range t.Members {
 			full := strings.ToLower(s.name(m))
-			if n != "" && (full == n || strings.Fields(full)[0] == n) && !contains(out, m) {
+			if n != "" && (full == n || firstName(full) == n) && !contains(out, m) {
 				out = append(out, m)
 			}
 		}
 	}
 	return out
-}
-
-func startOfDay(t time.Time) time.Time {
-	y, m, d := t.In(IST).Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, IST)
 }
 
 // ConfirmPlan is the human yes. Only now does each member get a request on

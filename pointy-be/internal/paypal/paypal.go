@@ -1,8 +1,9 @@
 // Package paypal is Pointy's payment rail. Money comes in with checkout (the
 // Orders API): a person approves a payment and it lands in Pointy's PayPal
-// business account. Money goes out with Payouts: from that business account
-// to a real PayPal account (a withdrawal, a shop paid from a trip wallet, a
-// refund at settle-up). In between, Pointy's ledger records whose money it
+// business account. A group buy uses the same API with intent AUTHORIZE:
+// the money is held, and taken only when everyone says yes. Money goes out
+// with Payouts: a withdrawal from that business account to the person's
+// own PayPal account. In between, Pointy's ledger records whose money it
 // is. (Payouts is not offered to Indian accounts; the demo uses a US sandbox
 // business account.)
 package paypal

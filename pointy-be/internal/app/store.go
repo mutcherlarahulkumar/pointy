@@ -20,7 +20,8 @@ type Store interface {
 	// domain.Session, domain.SessionEnd, *domain.Trip, domain.Entry,
 	// *domain.Deposit, *domain.Expense, *domain.DepositRequest,
 	// *domain.Plan, *domain.Alert, *domain.MoneyRequest, *domain.Payout,
-	// *domain.GroupBuy, *domain.FamilyLink and *domain.Approval.
+	// *domain.GroupBuy, *domain.FamilyLink, *domain.Approval,
+	// *domain.ChatMessage and domain.ChatCleared.
 	Save(ctx context.Context, items []any) error
 }
 
@@ -50,7 +51,9 @@ type MemoryStore struct{}
 func (MemoryStore) Load(context.Context) (*Snapshot, error) { return &Snapshot{}, nil }
 func (MemoryStore) Save(context.Context, []any) error       { return nil }
 
-// track marks an object as changed by the operation in progress.
+// track marks an object as changed by the operation in progress. Check
+// everything before changing anything: a call that fails after tracking
+// leaves its changes in memory, and the next commit saves them.
 func (s *Service) track(items ...any) { s.pending = append(s.pending, items...) }
 
 // commitL saves every tracked change in one transaction. If the database
@@ -123,7 +126,6 @@ func (s *Service) loadL(ctx context.Context) error {
 	s.groupBuys = snap.GroupBuys
 	s.familyLinks = snap.FamilyLinks
 	s.approvals = snap.Approvals
-	s.holds = map[string]Paise{}
 	s.chats = map[string][]*domain.ChatMessage{}
 	for _, m := range snap.Chats {
 		s.chats[m.UserID] = append(s.chats[m.UserID], m)

@@ -116,19 +116,10 @@ func (s *Service) RequestMoney(userID string, in MoneyRequestInput) (MoneyReques
 }
 
 func (s *Service) requestMoneyL(userID string, in MoneyRequestInput) (*domain.MoneyRequest, error) {
-	if err := checkAmount(in.Amount); err != nil {
+	if err := s.checkMoneyRequestL(userID, in); err != nil {
 		return nil, err
 	}
-	if _, ok := s.users[in.PayerID]; !ok {
-		return nil, domain.Invalid("choose who to ask")
-	}
-	if in.PayerID == userID {
-		return nil, domain.Invalid("you cannot ask yourself for money")
-	}
 	note := strings.TrimSpace(in.Note)
-	if len([]rune(note)) > 80 {
-		return nil, domain.Invalid("keep the note under 80 letters")
-	}
 	r := &domain.MoneyRequest{ID: s.idL("mr"), RequesterID: userID, PayerID: in.PayerID, Amount: in.Amount, Note: note, Status: "open", CreatedAt: s.now()}
 	s.moneyRequests = append(s.moneyRequests, r)
 	s.track(r)
@@ -138,6 +129,43 @@ func (s *Service) requestMoneyL(userID string, in MoneyRequestInput) (*domain.Mo
 	}
 	s.alertL("", in.PayerID, "request", s.name(userID)+" asked you for "+INR(in.Amount), body)
 	return r, nil
+}
+
+// checkMoneyRequestL says whether requestMoneyL would accept in, without
+// changing anything.
+func (s *Service) checkMoneyRequestL(userID string, in MoneyRequestInput) error {
+	if err := checkAmount(in.Amount); err != nil {
+		return err
+	}
+	if _, ok := s.users[in.PayerID]; !ok {
+		return domain.Invalid("choose who to ask")
+	}
+	if in.PayerID == userID {
+		return domain.Invalid("you cannot ask yourself for money")
+	}
+	if len([]rune(strings.TrimSpace(in.Note))) > maxNote {
+		return domain.Invalid("keep the note under %d letters", maxNote)
+	}
+	return nil
+}
+
+// sendRequestsL sends every request, or none: all are checked before any
+// is made, so a refused one leaves nothing half done.
+func (s *Service) sendRequestsL(userID string, ins []MoneyRequestInput) ([]MoneyRequestView, error) {
+	for _, in := range ins {
+		if err := s.checkMoneyRequestL(userID, in); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]MoneyRequestView, 0, len(ins))
+	for _, in := range ins {
+		r, err := s.requestMoneyL(userID, in)
+		if err != nil {
+			return nil, err // cannot happen: checked above
+		}
+		out = append(out, s.mrViewL(r, userID))
+	}
+	return out, nil
 }
 
 func (s *Service) MoneyRequests(userID string) []MoneyRequestView {
@@ -249,21 +277,20 @@ func (s *Service) SplitBill(userID string, in SplitBillInput) (SplitBillResult, 
 	if err != nil {
 		return SplitBillResult{}, err
 	}
-	out := SplitBillResult{Shares: shares, Requests: []MoneyRequestView{}}
+	var asks []MoneyRequestInput
 	for _, sh := range shares {
-		if sh.UserID == userID || sh.Amount == 0 {
-			continue
+		if sh.UserID != userID && sh.Amount != 0 {
+			asks = append(asks, MoneyRequestInput{PayerID: sh.UserID, Amount: sh.Amount, Note: fitNote("Your share of " + in.Description)})
 		}
-		r, err := s.requestMoneyL(userID, MoneyRequestInput{PayerID: sh.UserID, Amount: sh.Amount, Note: "Your share of " + in.Description})
-		if err != nil {
-			s.pending = nil
-			return SplitBillResult{}, err
-		}
-		out.Requests = append(out.Requests, s.mrViewL(r, userID))
 	}
-	if len(out.Requests) == 0 {
+	if len(asks) == 0 {
 		return SplitBillResult{}, domain.Invalid("add at least one other person to split with")
 	}
+	reqs, err := s.sendRequestsL(userID, asks)
+	if err != nil {
+		return SplitBillResult{}, err
+	}
+	out := SplitBillResult{Shares: shares, Requests: reqs}
 	if err := s.commitL(); err != nil {
 		return SplitBillResult{}, err
 	}
@@ -328,6 +355,11 @@ func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResul
 		if name == "" || it.Amount <= 0 {
 			return ItemSplitResult{}, domain.Invalid("every item needs a name and a price")
 		}
+		// Each price within the limit keeps the sum of up to 100 of them
+		// far from overflowing.
+		if err := checkAmount(it.Amount); err != nil {
+			return ItemSplitResult{}, err
+		}
 		if len(it.People) == 0 {
 			return ItemSplitResult{}, domain.Invalid("choose who had %s", name)
 		}
@@ -387,23 +419,23 @@ func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResul
 			}
 		}
 	}
-	out := ItemSplitResult{Total: total, Parts: []ItemSplitPart{}, Requests: []MoneyRequestView{}}
+	out := ItemSplitResult{Total: total, Parts: []ItemSplitPart{}}
+	var asks []MoneyRequestInput
 	for _, u := range order {
 		part := ItemSplitPart{User: s.users[u].Public(), Items: items[u], Subtotal: sub[u], Extra: extra[u], Total: sub[u] + extra[u]}
 		out.Parts = append(out.Parts, part)
-		if u == userID || part.Total <= 0 {
-			continue
+		if u != userID && part.Total > 0 {
+			asks = append(asks, MoneyRequestInput{PayerID: u, Amount: part.Total, Note: itemNote(in.Description, part.Items)})
 		}
-		r, err := s.requestMoneyL(userID, MoneyRequestInput{PayerID: u, Amount: part.Total, Note: itemNote(in.Description, part.Items)})
-		if err != nil {
-			s.pending = nil
-			return ItemSplitResult{}, err
-		}
-		out.Requests = append(out.Requests, s.mrViewL(r, userID))
 	}
-	if len(out.Requests) == 0 {
+	if len(asks) == 0 {
 		return ItemSplitResult{}, domain.Invalid("give at least one item to someone else")
 	}
+	reqs, err := s.sendRequestsL(userID, asks)
+	if err != nil {
+		return ItemSplitResult{}, err
+	}
+	out.Requests = reqs
 	if err := s.commitL(); err != nil {
 		return ItemSplitResult{}, err
 	}
@@ -412,9 +444,16 @@ func (s *Service) SplitByItems(userID string, in ItemSplitInput) (ItemSplitResul
 
 // itemNote is "Dinner: Paneer tikka, Lime soda" cut to fit a request note.
 func itemNote(desc string, items []string) string {
-	note := desc + ": " + strings.Join(items, ", ")
-	if r := []rune(note); len(r) > 80 {
-		note = strings.TrimSpace(string(r[:79])) + "…"
+	return fitNote(desc + ": " + strings.Join(items, ", "))
+}
+
+// maxNote is how many letters a request note holds.
+const maxNote = 80
+
+// fitNote cuts a note the app wrote to fit a request note.
+func fitNote(note string) string {
+	if len([]rune(note)) > maxNote {
+		note = clip(note, maxNote-1) + "…"
 	}
 	return note
 }

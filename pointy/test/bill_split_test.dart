@@ -77,6 +77,38 @@ void main() {
     expect(find.text('Sent 1 request'), findsOneWidget);
   });
 
+  testWidgets('removing someone after giving them an item un-assigns it', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.7;
+    addTearDown(tester.view.reset);
+    api = fakeApi(log: sent, overrides: {
+      'GET /api/contacts': (200, '[{"id":"$_dev","name":"Dev Mehta","phone":"9123456780"},{"id":"u_meera","name":"Meera Iyer","phone":"9123456781"}]'),
+    });
+    api.userId = _me;
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: const BillSplitScreen()));
+    await tester.pumpAndSettle();
+    await addItem(tester, 'Thali', '300');
+    await tester.tap(find.text('Continue · ₹300'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dev Mehta'));
+    await tester.tap(find.text('Meera Iyer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue with 3 people'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilterChip, 'Meera'));
+    await tester.pumpAndSettle();
+    expect(find.text('Send requests'), findsOneWidget);
+
+    // Back: Meera was not there after all.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Meera Iyer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue with 2 people'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 item left to share'), findsOneWidget);
+  });
+
   test('a minus sign is a discount', () {
     expect(parseSignedPaise('-50'), -5000);
     expect(parseSignedPaise('120.5'), 12050);

@@ -173,7 +173,7 @@ type Expense struct {
 	Description string    `json:"description"`
 	Category    Category  `json:"category"`
 	Amount      Paise     `json:"amount_paise"`
-	Mode        string    `json:"mode"`                  // trip: member or reimburse; personal: transfer
+	Mode        string    `json:"mode"`                  // trip: member, reimburse or group_buy (paypal on old rows); personal: transfer
 	Payee       string    `json:"payee"`                 // who was paid, as shown on the receipt
 	PayeeUserID string    `json:"payee_user_id"`         // the Pointy user whose balance received the money
 	PayeeEmail  string    `json:"payee_email,omitempty"` // mode paypal: the PayPal account paid
@@ -263,9 +263,9 @@ type ChatAction struct {
 // ChatCleared deletes a person's conversation.
 type ChatCleared struct{ UserID string }
 
-// Payout is money leaving Pointy's PayPal business account for a real
-// PayPal account: a withdrawal, a shop paid from a trip wallet, or a
-// settle-up refund.
+// Payout is money leaving Pointy's PayPal business account for the
+// person's own PayPal account: a withdrawal. (Older rows may be shop
+// payments or refunds from before trips became wallet-only.)
 type Payout struct {
 	ID          string     `json:"id"`
 	UserID      string     `json:"user_id"`           // whose money it was (for a trip, who paid)

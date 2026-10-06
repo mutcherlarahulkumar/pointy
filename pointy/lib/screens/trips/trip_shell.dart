@@ -29,7 +29,7 @@ class _TripShellState extends State<TripShell> {
   Future<(Trip, Me)> _load() async => (await api.trip(widget.tripId), await api.me());
 
   /// Tabs call this after they change something, so the header updates.
-  void _reload() => setState(() => _data = _load());
+  void _reload() => setState(() { _data = _load(); });
 
   @override
   Widget build(BuildContext context) {

@@ -134,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
   Future<void> _refreshQuietly() async {
     try {
       final d = await _load();
-      if (mounted) setState(() => _data = Future.value(d));
+      if (mounted) setState(() { _data = Future.value(d); });
     } catch (_) {
       // Keep showing what we have; the next tick tries again.
     }
@@ -152,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
       initialData: _last,
       builder: (context, snap) {
         if (snap.hasError && snap.data == null) {
-          return ErrorView(message: '${snap.error}', onRetry: () => setState(() => _data = _load()));
+          return ErrorView(message: '${snap.error}', onRetry: () => setState(() { _data = _load(); }));
         }
         return AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
@@ -214,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> with ReloadWhenShown {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () async {
                   await Navigator.of(context).push(familyRoute());
-                  if (mounted) setState(() => _data = _load());
+                  if (mounted) setState(() { _data = _load(); });
                 },
               ),
             ),

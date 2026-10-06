@@ -62,11 +62,26 @@ class PaymentLock {
 /// [what] reads as "Pay ₹200 to Asha". With fingerprint chosen, a failed or
 /// cancelled scan falls back to the PIN, so nobody is ever locked out.
 Future<bool> confirmPayment(BuildContext context, String what) async {
-  final lock = PaymentLock.instance;
-  if (await lock.mode() == PayCheck.biometric && await lock.biometricCheck(what)) return true;
-  if (!context.mounted) return false;
-  return askPin(context, what);
+  // A second tap while the first check is still open is not a second OK:
+  // screens set their busy flag only after this returns. Kept per screen,
+  // so a screen that goes away mid-check cannot block the others.
+  final screen = ModalRoute.of(context) ?? context;
+  if (_confirming[screen] == true) return false;
+  _confirming[screen] = true;
+  try {
+    final lock = PaymentLock.instance;
+    if (await lock.mode() == PayCheck.biometric && await lock.biometricCheck(what)) return true;
+    if (!context.mounted) return false;
+    return await askPin(context, what);
+  } finally {
+    // Open again only after the next frame, once the screen has drawn its
+    // button as busy; a tap in between would still find it enabled.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _confirming[screen] = null);
+    WidgetsBinding.instance.scheduleFrame();
+  }
 }
+
+final _confirming = Expando<bool>('confirming');
 
 /// Shows the Pointy PIN sheet; true when the server accepted the PIN.
 Future<bool> askPin(BuildContext context, String what) async => await pinValue(context, what) != null;
