@@ -32,6 +32,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  test('a long product title is shortened without splitting an emoji', () {
+    final title = '${'a' * 38}🧴 sunscreen SPF 50, 200 ml';
+    final short = shortTitle(title);
+    expect(short, '${'a' * 38}🧴…');
+    expect(() => utf8.encode(short), returnsNormally);
+    expect(short.runes.any((r) => r >= 0xD800 && r <= 0xDFFF), isFalse, reason: 'no lone surrogate');
+    expect(shortTitle('Speaker'), 'Speaker');
+  });
+
   testWidgets('a starter question gets an answer from the account', (tester) async {
     await open(tester, turn: [
       {'id': 'm1', 'role': 'user', 'text': "What's my balance?"},
