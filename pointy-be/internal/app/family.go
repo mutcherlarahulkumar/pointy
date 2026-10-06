@@ -702,10 +702,7 @@ func (s *Service) AskApproval(childID string, in ApprovalInput) (ApprovalView, e
 	if bal := s.availL(domain.PersonalAccount(childID)); bal < in.Amount {
 		return ApprovalView{}, domain.Conflict("insufficient_balance", "your balance is "+INR(bal), nil)
 	}
-	note := strings.TrimSpace(in.Note)
-	if len(note) > 80 {
-		note = note[:80]
-	}
+	note := clip(strings.TrimSpace(in.Note), 80)
 	now := s.now()
 	reason := "monthly"
 	if s.spentByL(childID, dayStart(now))+in.Amount > l.DailyLimit {

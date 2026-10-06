@@ -200,6 +200,9 @@ func (s *Service) ProposeGroupBuy(tripID, userID, searchID string, index int, wh
 		return nil, domain.Invalid("choose one of the picks")
 	}
 	item := sr.items[index]
+	if err := checkAmount(item.Price); err != nil {
+		return nil, err
+	}
 	parts := make([]domain.SplitInput, 0, len(t.Members))
 	for _, m := range t.Members {
 		parts = append(parts, domain.SplitInput{UserID: m, Weight: 1})
@@ -211,9 +214,7 @@ func (s *Service) ProposeGroupBuy(tripID, userID, searchID string, index int, wh
 	now := s.now()
 	g := &domain.GroupBuy{ID: s.idL("gb"), TripID: tripID, ProposedBy: userID, Request: sr.request, Why: strings.TrimSpace(why),
 		Item: item, Category: guessCategory(sr.query), Amount: item.Price, Status: "open", Deadline: now.Add(groupBuyWindow), CreatedAt: now}
-	if len(g.Why) > 300 {
-		g.Why = g.Why[:300]
-	}
+	g.Why = clip(g.Why, 300)
 	for _, sh := range shares {
 		g.Shares = append(g.Shares, domain.GroupBuyShare{UserID: sh.UserID, Amount: sh.Amount, Status: "waiting"})
 	}

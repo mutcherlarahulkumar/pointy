@@ -149,6 +149,14 @@ func (s *Service) name(userID string) string {
 	return "Someone"
 }
 
+// clip cuts s to at most n letters, never through the middle of one.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return strings.TrimSpace(string(r[:n]))
+	}
+	return s
+}
+
 func checkAmount(a Paise) error {
 	if a <= 0 {
 		return domain.Invalid("amount must be more than zero")
@@ -467,6 +475,12 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 			return d, nil
 		}
 		return nil, domain.Conflict("capture_in_progress", "this payment is already being completed", nil)
+	}
+	if t := s.trips[d.TripID]; d.TripID != "" && t != nil && t.Status != "open" {
+		// An old trip order approved after the trip was settled: its money
+		// would land in a share nobody can be refunded from.
+		s.mu.Unlock()
+		return nil, domain.Conflict("trip_closed", "this trip is "+t.Status, nil)
 	}
 	if s.isChildL(d.UserID) {
 		// Started before the account became a child account: PayPal is

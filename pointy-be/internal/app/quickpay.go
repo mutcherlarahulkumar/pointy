@@ -77,9 +77,7 @@ func (s *Service) QuickPay(ctx context.Context, userID, text string) (QuickPayRe
 		out.Amount = 0
 		out.Reply = fmt.Sprintf("That is over the %s limit for one payment.", INR(MaxAmount))
 	}
-	if len(out.Note) > 60 {
-		out.Note = strings.TrimSpace(out.Note[:60])
-	}
+	out.Note = clip(out.Note, 60)
 	if out.Reply == "" || !out.Ready() {
 		out.Reply = quickPayReply(out)
 	}
