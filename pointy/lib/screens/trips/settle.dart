@@ -45,7 +45,7 @@ class _SettleScreenState extends State<SettleScreen> {
     setState(() => _busy = true);
     try {
       final done = await api.settle(widget.trip.id, key: _key);
-      setState(() => _settlement = Future.value(done));
+      setState(() { _settlement = Future.value(done); });
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => SuccessScreen(
@@ -70,7 +70,7 @@ class _SettleScreenState extends State<SettleScreen> {
       appBar: AppBar(title: const Text('Settle up')),
       body: AsyncView<Settlement>(
         future: _settlement,
-        onRetry: () => setState(() => _settlement = api.settlement(widget.trip.id)),
+        onRetry: () => setState(() { _settlement = api.settlement(widget.trip.id); }),
         builder: (context, s) {
           final settled = s.status != 'open';
           return ListView(

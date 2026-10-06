@@ -28,11 +28,11 @@ class _SpendingTabState extends State<SpendingTab> {
     final t = widget.trip;
     return AsyncView<List<Expense>>(
       future: _expenses,
-      onRetry: () => setState(() => _expenses = api.expenses(t.id)),
+      onRetry: () => setState(() { _expenses = api.expenses(t.id); }),
       builder: (context, expenses) {
         final newestFirst = [...expenses]..sort((a, b) => b.at.compareTo(a.at));
         return RefreshIndicator(
-          onRefresh: () async => setState(() => _expenses = api.expenses(t.id)),
+          onRefresh: () async => setState(() { _expenses = api.expenses(t.id); }),
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [

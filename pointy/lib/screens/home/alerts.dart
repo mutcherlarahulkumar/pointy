@@ -53,7 +53,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
       appBar: AppBar(title: const Text('Alerts')),
       body: AsyncView<List<AlertItem>>(
         future: _alerts,
-        onRetry: () => setState(() => _alerts = api.alerts()),
+        onRetry: () => setState(() { _alerts = api.alerts(); }),
         builder: (context, alerts) {
           if (alerts.isEmpty) {
             return const EmptyState(icon: Icons.notifications_none_rounded, title: 'All quiet', body: 'Payments, requests and budget warnings show up here.');
@@ -79,7 +79,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ));
           }
           return RefreshIndicator(
-            onRefresh: () async => setState(() => _alerts = api.alerts()),
+            onRefresh: () async => setState(() { _alerts = api.alerts(); }),
             child: ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), children: rows),
           );
         },

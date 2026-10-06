@@ -104,7 +104,7 @@ class _RequestViewScreenState extends State<RequestViewScreen> {
                             await Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => TopUpScreen(suggestPaise: r.amountPaise - me.personalBalancePaise),
                             ));
-                            if (mounted) setState(() => _data = _load());
+                            if (mounted) setState(() { _data = _load(); });
                           },
                   ),
                 ],

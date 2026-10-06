@@ -31,7 +31,7 @@ class FamilyScreen extends StatefulWidget {
 class _FamilyScreenState extends State<FamilyScreen> {
   late Future<FamilyView> _family = api.family();
 
-  void _reload() => setState(() => _family = api.family());
+  void _reload() => setState(() { _family = api.family(); });
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));

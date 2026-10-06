@@ -26,7 +26,7 @@ class _BudgetTabState extends State<BudgetTab> {
   late Future<Budgets> _budgets = api.budgets(widget.trip.id);
 
   void _reload() {
-    setState(() => _budgets = api.budgets(widget.trip.id));
+    setState(() { _budgets = api.budgets(widget.trip.id); });
     widget.onChanged();
   }
 

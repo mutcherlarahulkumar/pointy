@@ -62,7 +62,7 @@ class _GroupBuyScreenState extends State<GroupBuyScreen> with WidgetsBindingObse
       if (!mounted) return;
       if (!g.isOpen) _poll?.cancel();
       if (g.status == 'paid') return _celebrate(g);
-      setState(() => _buy = Future.value(g));
+      setState(() { _buy = Future.value(g); });
     } catch (e) {
       if (!quiet && mounted) showError(context, e);
     }
@@ -70,7 +70,7 @@ class _GroupBuyScreenState extends State<GroupBuyScreen> with WidgetsBindingObse
 
   void _show(GroupBuy g) {
     if (g.status == 'paid') return _celebrate(g);
-    setState(() => _buy = Future.value(g));
+    setState(() { _buy = Future.value(g); });
   }
 
   void _celebrate(GroupBuy g) {

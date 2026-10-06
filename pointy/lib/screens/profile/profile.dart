@@ -147,7 +147,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _family() async {
     await Navigator.of(context).push(familyRoute());
-    setState(() => _me = api.me());
+    setState(() { _me = api.me(); });
   }
 
   /// Everything Pointy does, grouped, each with one line saying what it is,
@@ -205,7 +205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           me.paypalEmail.isEmpty ? 'Add the PayPal account your withdrawals go to' : 'PayPal · ${me.paypalEmail}',
           () async {
             await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PayPalAccountScreen(current: me.paypalEmail)));
-            setState(() => _me = api.me());
+            setState(() { _me = api.me(); });
           }
         ),
         (Icons.receipt_long_rounded, 'History', 'Every payment, newest first, tagged Trip or Personal', () => _tab(3)),

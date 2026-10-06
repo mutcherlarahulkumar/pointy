@@ -36,7 +36,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     return (c, await api.childActivity(widget.childId));
   }
 
-  void _reload() => setState(() => _data = _load());
+  void _reload() => setState(() { _data = _load(); });
 
   Future<void> _limits(ChildView c) async {
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _LimitsEditScreen(c: c)));

@@ -25,7 +25,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   late Future<List<MoneyRequest>> _list = api.moneyRequests();
   final Set<String> _busy = {};
 
-  void _reload() => setState(() => _list = api.moneyRequests());
+  void _reload() => setState(() { _list = api.moneyRequests(); });
 
   Future<void> _act(MoneyRequest r, Future<void> Function() action, String done) async {
     setState(() => _busy.add(r.id));

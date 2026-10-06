@@ -28,7 +28,7 @@ class _TripsScreenState extends State<TripsScreen> with ReloadWhenShown {
 
   late Future<List<Trip>> _trips = api.trips();
 
-  void _reload() => setState(() => _trips = api.trips());
+  void _reload() => setState(() { _trips = api.trips(); });
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(screen is TripShell ? tripRoute(screen.tripId) : MaterialPageRoute(builder: (_) => screen));

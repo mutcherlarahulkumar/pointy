@@ -145,7 +145,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
       setState(() => _busy = false);
       if (e.code == 'needs_parent') return _askParent(e);
       showError(context, e);
-      if (e.code == 'insufficient_balance') setState(() => _me = api.me());
+      if (e.code == 'insufficient_balance') setState(() { _me = api.me(); });
     }
   }
 
@@ -225,7 +225,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   Widget build(BuildContext context) {
     return AsyncView<Me>(
       future: _me,
-      onRetry: () => setState(() => _me = api.me()),
+      onRetry: () => setState(() { _me = api.me(); }),
       builder: (context, me) {
         final after = me.personalBalancePaise - widget.amountPaise;
         final short = after < 0;
@@ -242,7 +242,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
               : short
               ? () async {
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TopUpScreen(suggestPaise: -after)));
-                  setState(() => _me = api.me());
+                  setState(() { _me = api.me(); });
                 }
               : _pay,
           footer: Text.rich(

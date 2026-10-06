@@ -30,7 +30,7 @@ class _DepositsTabState extends State<DepositsTab> {
   late Future<List<DepositRequest>> _requests = api.requests(widget.trip.id);
 
   void _reload() {
-    setState(() => _requests = api.requests(widget.trip.id));
+    setState(() { _requests = api.requests(widget.trip.id); });
     widget.onChanged();
   }
 
