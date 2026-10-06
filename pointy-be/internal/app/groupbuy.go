@@ -273,12 +273,19 @@ func shareOf(g *domain.GroupBuy, userID string) *domain.GroupBuyShare {
 	return nil
 }
 
+// overdueL says whether an open purchase ran out of time: people say yes
+// before the deadline, so at the deadline it is too late. It is closed by
+// expireDue; until then it holds nothing and blocks nothing.
+func (s *Service) overdueL(g *domain.GroupBuy) bool {
+	return g.Status == "open" && !s.now().Before(g.Deadline)
+}
+
 // heldForBuysL is trip-share money promised to open group purchases, so it
 // cannot be spent twice. It is worked out from stored purchases, so it
 // survives a restart.
 func (s *Service) heldForBuysL(account string) (sum Paise) {
 	for _, g := range s.groupBuys {
-		if g.Status != "open" && g.Status != "paying" {
+		if (g.Status != "open" && g.Status != "paying") || s.overdueL(g) {
 			continue
 		}
 		for _, sh := range g.Shares {
@@ -293,7 +300,7 @@ func (s *Service) heldForBuysL(account string) (sum Paise) {
 // openBuysOnTripL says whether a trip still has purchases being decided.
 func (s *Service) openBuysOnTripL(tripID string) bool {
 	for _, g := range s.groupBuys {
-		if g.TripID == tripID && (g.Status == "open" || g.Status == "paying") {
+		if g.TripID == tripID && (g.Status == "open" || g.Status == "paying") && !s.overdueL(g) {
 			return true
 		}
 	}
@@ -303,6 +310,7 @@ func (s *Service) openBuysOnTripL(tripID string) bool {
 // JoinGroupBuy says yes with the person's share: from their trip share
 // (held at once) or with PayPal (answers with the PayPal page to approve).
 func (s *Service) JoinGroupBuy(ctx context.Context, id, userID, via string) (*domain.GroupBuy, error) {
+	s.expireDue(ctx)
 	s.mu.Lock()
 	g, err := s.groupBuyL(id, userID)
 	if err == nil && g.Status != "open" {
@@ -369,6 +377,7 @@ func (s *Service) JoinGroupBuy(ctx context.Context, id, userID, via string) (*do
 // AuthorizeGroupBuyOrder places the PayPal hold once the person approved.
 // userID is empty when PayPal's return page calls it.
 func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID string) (*domain.GroupBuy, error) {
+	s.expireDue(ctx)
 	s.mu.Lock()
 	g, sh := s.findOrderL(orderID)
 	if g == nil || (userID != "" && sh.UserID != userID) {
@@ -387,13 +396,17 @@ func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID st
 	}
 
 	s.mu.Lock()
-	if g.Status != "open" {
+	if g.Status != "open" || s.overdueL(g) {
 		s.mu.Unlock()
+		s.expireDue(ctx)
 		// Too late (someone said no, or time ran out): let the hold go.
 		if err := s.pp.VoidAuthorization(ctx, authID); err != nil {
 			log.Printf("group buy %s: void late authorization: %v", g.ID, err)
 		}
-		return nil, domain.Conflict("group_buy_closed", "this purchase is "+g.Status+"; nothing was charged", nil)
+		s.mu.Lock()
+		status := g.Status
+		s.mu.Unlock()
+		return nil, domain.Conflict("group_buy_closed", "this purchase is "+status+"; nothing was charged", nil)
 	}
 	now := s.now()
 	sh.Status, sh.AuthID, sh.ApproveURL, sh.CommittedAt = "in", authID, "", &now
@@ -432,6 +445,7 @@ func (s *Service) findOrderL(orderID string) (*domain.GroupBuy, *domain.GroupBuy
 // DeclineGroupBuy says no. One no is enough: the purchase is called off,
 // every hold is let go and nobody pays. The proposer can call it off too.
 func (s *Service) DeclineGroupBuy(ctx context.Context, id, userID string) (*domain.GroupBuy, error) {
+	s.expireDue(ctx)
 	s.mu.Lock()
 	g, err := s.groupBuyL(id, userID)
 	if err == nil && shareOf(g, userID) == nil {
@@ -460,7 +474,7 @@ func (s *Service) expireDue(ctx context.Context) {
 	s.mu.Lock()
 	var due []*domain.GroupBuy
 	for _, g := range s.groupBuys {
-		if g.Status == "open" && s.now().After(g.Deadline) {
+		if s.overdueL(g) {
 			due = append(due, g)
 		}
 	}
@@ -517,6 +531,10 @@ func (s *Service) maybeFinish(ctx context.Context, id string) (*domain.GroupBuy,
 	if g == nil || g.Status != "open" {
 		s.mu.Unlock()
 		return g, nil
+	}
+	if s.overdueL(g) {
+		s.mu.Unlock()
+		return s.closeGroupBuy(ctx, g, "expired", "not everyone said yes in time")
 	}
 	for _, sh := range g.Shares {
 		if sh.Status != "in" {

@@ -53,6 +53,7 @@ func (s *Service) SettlementPreview(tripID, userID string) (Settlement, error) {
 // Settle closes the trip: what is left in each share goes back to that
 // person's Pointy balance. Only the organiser can do it.
 func (s *Service) Settle(tripID, userID string) (Settlement, error) {
+	s.expireDue(context.Background()) // purchases whose time ran out let their holds go
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, err := s.openTripL(tripID, userID)
