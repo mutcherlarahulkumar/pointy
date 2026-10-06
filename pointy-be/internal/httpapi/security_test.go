@@ -104,3 +104,17 @@ func TestSignInIsNeverReplayed(t *testing.T) {
 		t.Fatalf("a wrong PIN with the same key got %d and the token back", st)
 	}
 }
+
+// The web app's DELETE (clear the AI chat) must pass the CORS preflight.
+func TestCORSAllowsDelete(t *testing.T) {
+	srv := testServer(t)
+	req, _ := http.NewRequest("OPTIONS", srv.URL+"/api/assistant/messages", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if !bytes.Contains([]byte(res.Header.Get("Access-Control-Allow-Methods")), []byte("DELETE")) {
+		t.Fatalf("allowed methods %q", res.Header.Get("Access-Control-Allow-Methods"))
+	}
+}
