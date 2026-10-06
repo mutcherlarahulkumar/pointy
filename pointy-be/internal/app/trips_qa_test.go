@@ -67,6 +67,32 @@ func TestQAAuthorizeAfterDeadlineIsVoided(t *testing.T) {
 	}
 }
 
+// Huge share weights or exact amounts must be refused as invalid, never
+// wrap around int64 into negative or oversized shares.
+func TestQASplitRefusesOverflow(t *testing.T) {
+	big := int64(1) << 62
+	cases := []struct {
+		method domain.SplitMethod
+		in     []domain.SplitInput
+	}{
+		{domain.SplitShares, []domain.SplitInput{{UserID: "a", Weight: big}, {UserID: "b", Weight: big}}},
+		// three amounts that wrap around to exactly 1,000 paise
+		{domain.SplitExact, []domain.SplitInput{{UserID: "a", Exact: 6148914691236517539}, {UserID: "b", Exact: 6148914691236517539}, {UserID: "c", Exact: 6148914691236517538}}},
+	}
+	for i, c := range cases {
+		shares, err := domain.Split(1000, c.method, c.in)
+		if code(err) != "invalid" {
+			t.Errorf("case %d: shares %v err %v", i, shares, err)
+		}
+	}
+	// A big weight that fits is worked out exactly (it used to wrap and
+	// come out as 500 and 500).
+	shares, err := domain.Split(1000, domain.SplitShares, []domain.SplitInput{{UserID: "a", Weight: big}, {UserID: "b", Weight: 1}})
+	if err != nil || shares[0].Amount != 1000 || shares[1].Amount != 0 {
+		t.Errorf("big weight: %v %v", shares, err)
+	}
+}
+
 // hookPP lets a test run something while PayPal is placing a hold, the
 // moment the service has let go of its lock.
 type hookPP struct {
