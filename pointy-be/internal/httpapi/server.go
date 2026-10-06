@@ -598,7 +598,12 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 
 func decode(r *http.Request, v any) error {
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil && !errors.Is(err, io.EOF) {
-		return domain.Invalid("request body is not valid JSON: %v", err)
+		// Name the field, never the server's own types.
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &te) && te.Field != "" {
+			return domain.Invalid("%s cannot be a %s", te.Field, te.Value)
+		}
+		return domain.Invalid("request body is not valid JSON")
 	}
 	return nil
 }

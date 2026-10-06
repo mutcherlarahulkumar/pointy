@@ -105,6 +105,25 @@ func TestSignInIsNeverReplayed(t *testing.T) {
 	}
 }
 
+// A bad body gets a plain answer that does not show the server's Go types.
+func TestBadJSONDoesNotShowInternals(t *testing.T) {
+	srv := testServer(t)
+	asha, _ := signUp(t, srv, "Asha", "9876543210")
+	for _, raw := range []string{`{"amount_paise":"lots"}`, `{"amount_paise":`, `[1,2]`} {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/topups", bytes.NewReader([]byte(raw)))
+		req.Header.Set("Authorization", "Bearer "+asha)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 400 || bytes.Contains(body, []byte("Go ")) || bytes.Contains(body, []byte("domain.")) || bytes.Contains(body, []byte("struct")) {
+			t.Fatalf("%s: %d %s", raw, res.StatusCode, body)
+		}
+	}
+}
+
 // The web app's DELETE (clear the AI chat) must pass the CORS preflight.
 func TestCORSAllowsDelete(t *testing.T) {
 	srv := testServer(t)
