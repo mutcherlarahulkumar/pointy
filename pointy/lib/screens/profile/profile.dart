@@ -147,7 +147,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _family() async {
     await Navigator.of(context).push(familyRoute());
-    setState(() { _me = api.me(); });
+    if (mounted) setState(() { _me = api.me(); });
   }
 
   /// Everything Pointy does, grouped, each with one line saying what it is,

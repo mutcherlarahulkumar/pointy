@@ -32,7 +32,7 @@ class _TripsScreenState extends State<TripsScreen> with ReloadWhenShown {
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(screen is TripShell ? tripRoute(screen.tripId) : MaterialPageRoute(builder: (_) => screen));
-    _reload();
+    if (mounted) _reload();
   }
 
   @override

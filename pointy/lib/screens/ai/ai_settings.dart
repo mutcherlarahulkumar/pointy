@@ -28,25 +28,37 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   title: const Text('Location'),
                   subtitle: const Text('A rough location, read only when you pay'),
                   value: AiPrefs.location,
-                  onChanged: (v) => setState(() => AiPrefs.location = v),
+                  onChanged: (v) {
+                    setState(() => AiPrefs.location = v);
+                    AiPrefs.save();
+                  },
                 ),
                 SwitchListTile(
                   title: const Text('Time of day'),
                   subtitle: const Text('To tell dinner from a morning taxi'),
                   value: AiPrefs.time,
-                  onChanged: (v) => setState(() => AiPrefs.time = v),
+                  onChanged: (v) {
+                    setState(() => AiPrefs.time = v);
+                    AiPrefs.save();
+                  },
                 ),
                 SwitchListTile(
                   title: const Text('Past choices'),
                   subtitle: const Text('Which wallet and split you picked before'),
                   value: AiPrefs.pastChoices,
-                  onChanged: (v) => setState(() => AiPrefs.pastChoices = v),
+                  onChanged: (v) {
+                    setState(() => AiPrefs.pastChoices = v);
+                    AiPrefs.save();
+                  },
                 ),
                 SwitchListTile(
                   title: const Text('Trip assistant'),
                   subtitle: const Text('Drafting deposit requests for you to approve'),
                   value: AiPrefs.assistant,
-                  onChanged: (v) => setState(() => AiPrefs.assistant = v),
+                  onChanged: (v) {
+                    setState(() => AiPrefs.assistant = v);
+                    AiPrefs.save();
+                  },
                 ),
               ],
             ),

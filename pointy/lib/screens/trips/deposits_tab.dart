@@ -36,7 +36,7 @@ class _DepositsTabState extends State<DepositsTab> {
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    _reload();
+    if (mounted) _reload();
   }
 
   Future<void> _remind(DepositRequest r) async {

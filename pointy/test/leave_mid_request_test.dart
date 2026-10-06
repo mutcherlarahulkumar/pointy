@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:pointy/api.dart';
 import 'package:pointy/screens/assistant/assistant.dart';
+import 'package:pointy/screens/money/requests.dart';
 import 'package:pointy/screens/money/top_up.dart';
 import 'package:pointy/screens/trips/settle.dart';
 import 'package:pointy/theme.dart';
@@ -26,7 +27,7 @@ void main() {
         await release.future;
         return http.Response.bytes(utf8.encode(body), 200, headers: {'content-type': 'application/json'});
       }
-      final hit = {'/api/me': fixture('me'), '/api/trips': fixture('trips')}[req.url.path] ?? '{}';
+      final hit = {'/api/me': fixture('me'), '/api/trips': fixture('trips'), '/api/money-requests': fixture('money_requests')}[req.url.path] ?? '{}';
       return http.Response.bytes(utf8.encode(hit), 200, headers: {'content-type': 'application/json'});
     });
     return ApiClient(baseUrl: fast.baseUrl, client: client)..token = 't';
@@ -101,6 +102,21 @@ void main() {
     await tester.tap(find.text('Send refunds'));
     await tester.pump();
     await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    release.complete();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('requests: leaving while a request is being cancelled', (tester) async {
+    final release = Completer<void>();
+    api = slow('/api/money-requests/mr_c13906684ab6/decline', '{"id":"mr_c13906684ab6","status":"cancelled"}', release);
+    await openFromRoot(tester, const RequestsScreen());
+    await tester.tap(find.text('Sent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel request'));
+    await tester.pump();
     await tester.pageBack();
     await tester.pumpAndSettle();
     release.complete();

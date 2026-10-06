@@ -58,6 +58,22 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
+  test('a reused key reads as a plain try-again, and the next try gets a new key', () async {
+    api = fakeApi(overrides: {
+      'POST /api/withdrawals': (422, '{"error":{"code":"idempotency_key_reused","message":"this Idempotency-Key was already used"}}'),
+    });
+    final k = SubmitKey();
+    final first = k.forRequest(1);
+    try {
+      await api.withdraw(100, key: first);
+      fail('expected an error');
+    } on ApiException catch (e) {
+      expect(e.toString(), 'That did not go through. Please try again.');
+      k.failed(e);
+    }
+    expect(k.forRequest(1), isNot(first));
+  });
+
   group('SubmitKey', () {
     test('the same request keeps its key, a changed one gets a new key', () {
       final k = SubmitKey();

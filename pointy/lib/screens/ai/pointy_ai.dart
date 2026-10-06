@@ -9,6 +9,8 @@ import '../../tabs.dart';
 import '../../theme.dart';
 import '../../widgets/ai_mark.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/chat_bubble.dart';
+import '../../widgets/product_image.dart';
 import '../money/pay_flow.dart';
 import '../money/request_flow.dart';
 import '../money/requests.dart';
@@ -257,22 +259,12 @@ class _PointyAiScreenState extends State<PointyAiScreen> {
 
   Widget _bubble(ChatMessage m) {
     final mine = m.mine;
-    final bubble = Container(
-      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: mine ? AppColors.pine700 : AppColors.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(18),
-          topRight: const Radius.circular(18),
-          bottomLeft: Radius.circular(mine ? 18 : 4),
-          bottomRight: Radius.circular(mine ? 4 : 18),
-        ),
-      ),
+    final bubble = ChatBubble(
+      mine: mine,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(m.text, style: AppText.body(color: mine ? Colors.white : AppColors.ink)),
+          Text(m.text, style: ChatBubble.textStyle(mine)),
           if (m.action != null && m.action!.type != 'shop') ...[
             const SizedBox(height: 10),
             _actionButton(m.action!),
@@ -538,6 +530,13 @@ class _PointyAiButtonState extends State<PointyAiButton> with SingleTickerProvid
   }
 }
 
+/// Shortens a product title for the "What was it?" fields (40 characters),
+/// counting what people see as characters, so an emoji is never cut in half.
+String shortTitle(String title, [int max = 40]) {
+  final chars = title.characters;
+  return chars.length <= max ? title : '${chars.take(max - 1).toString().trimRight()}…';
+}
+
 /// Products Pointy AI found, side by side. Each opens the shop; once bought,
 /// it can be split with friends or added to a trip as an expense.
 class ShopPicks extends StatelessWidget {
@@ -565,8 +564,7 @@ class _ProductCard extends StatelessWidget {
 
   final ShopItem item;
 
-  // Short enough for the "What was it?" fields (40 characters).
-  String get _what => item.title.length <= 40 ? item.title : '${item.title.substring(0, 39).trimRight()}…';
+  String get _what => shortTitle(item.title);
 
   Future<void> _open(BuildContext context) async {
     final ok = await launchUrl(Uri.parse(item.buyUrl), mode: LaunchMode.externalApplication);
@@ -616,18 +614,7 @@ class _ProductCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 110,
-            width: double.infinity,
-            color: AppColors.ground,
-            child: item.imageUrl.isEmpty
-                ? const Icon(Icons.shopping_bag_outlined, color: AppColors.slate, size: 36)
-                : Image.network(
-                    item.imageUrl,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag_outlined, color: AppColors.slate, size: 36),
-                  ),
-          ),
+          ProductImage(item.imageUrl, size: 110, width: double.infinity, radius: 0),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
             child: Column(

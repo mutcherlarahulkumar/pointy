@@ -40,7 +40,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
   Future<void> _limits(ChildView c) async {
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _LimitsEditScreen(c: c)));
-    if (saved == true) _reload();
+    if (saved == true && mounted) _reload();
   }
 
   Future<void> _unlink(ChildView c) async {
@@ -98,7 +98,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                     child: FilledButton.icon(
                       onPressed: () async {
                         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PayAmountScreen(person: c.child, note: 'Pocket money')));
-                        _reload();
+                        if (mounted) _reload();
                       },
                       icon: const Icon(Icons.redeem_rounded, size: 18),
                       label: const Text('Pocket money'),
