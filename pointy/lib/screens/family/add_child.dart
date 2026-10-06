@@ -243,14 +243,15 @@ class PairingCodeScreen extends StatefulWidget {
 class _PairingCodeScreenState extends State<PairingCodeScreen> {
   // The countdown ticks every second; every three, look whether the child
   // has accepted, and celebrate when they have.
-  late final Timer _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
-  late final Timer _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check());
+  late final Timer _tick;
+  late final Timer _poll;
   bool _linked = false;
 
   @override
   void initState() {
     super.initState();
-    _poll; // start polling
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check());
   }
 
   @override
@@ -265,7 +266,7 @@ class _PairingCodeScreenState extends State<PairingCodeScreen> {
     try {
       final f = await api.family();
       final c = f.children.where((c) => c.linkId == widget.invite.child.linkId).firstOrNull;
-      if (c != null && c.isActive && mounted) {
+      if (c != null && c.isActive && mounted && !_linked) { // two slow checks can both land
         _linked = true;
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => FamilyLinkedScreen(

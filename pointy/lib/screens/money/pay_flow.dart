@@ -111,8 +111,8 @@ class PayConfirmScreen extends StatefulWidget {
 
 class _PayConfirmScreenState extends State<PayConfirmScreen> {
   late Future<Me> _me = api.me();
-  // One key for this attempt: a double tap cannot pay twice.
-  String _key = newIdempotencyKey();
+  // One key per payment: a double tap or a retry cannot pay twice.
+  final _key = SubmitKey();
   bool _busy = false;
 
   Future<void> _pay({String parentCode = ''}) async {
@@ -120,13 +120,14 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
     if (parentCode.isEmpty && !await confirmPayment(context, 'Pay ${formatPaise(widget.amountPaise)} to ${widget.person.name}')) return;
     setState(() => _busy = true);
     try {
-      final e = await api.payPerson({
+      final body = {
         'payee_user_id': widget.person.id,
         'amount_paise': widget.amountPaise,
         'description': widget.note.isEmpty ? 'Payment' : widget.note,
         'category': 'other',
         if (parentCode.isNotEmpty) 'parent_code': parentCode,
-      }, key: _key);
+      };
+      final e = await api.payPerson(body, key: _key.forRequest(body));
       if (!mounted) return;
       // Close the flow and show the result on top of where it started.
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
@@ -139,12 +140,12 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
         ),
       ));
     } on ApiException catch (e) {
-      _key = newIdempotencyKey(); // the server stored this answer under the old key
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       if (e.code == 'needs_parent') return _askParent(e);
       showError(context, e);
-      if (e.code == 'insufficient_balance') setState(() => _me = api.me());
+      if (e.code == 'insufficient_balance') setState(() { _me = api.me(); });
     }
   }
 
@@ -224,7 +225,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
   Widget build(BuildContext context) {
     return AsyncView<Me>(
       future: _me,
-      onRetry: () => setState(() => _me = api.me()),
+      onRetry: () => setState(() { _me = api.me(); }),
       builder: (context, me) {
         final after = me.personalBalancePaise - widget.amountPaise;
         final short = after < 0;
@@ -241,7 +242,7 @@ class _PayConfirmScreenState extends State<PayConfirmScreen> {
               : short
               ? () async {
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TopUpScreen(suggestPaise: -after)));
-                  setState(() => _me = api.me());
+                  setState(() { _me = api.me(); });
                 }
               : _pay,
           footer: Text.rich(

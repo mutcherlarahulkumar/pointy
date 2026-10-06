@@ -247,10 +247,21 @@ class _AssignScreen extends StatefulWidget {
 }
 
 class _AssignScreenState extends State<_AssignScreen> {
-  final _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   List<Person> get _everyone => [Person(id: api.userId, name: 'You', phone: ''), ...widget.d.people];
+
+  @override
+  void initState() {
+    super.initState();
+    // Back on step 2 someone may have been taken off the list: their items
+    // are no longer theirs (they would still be asked to pay otherwise).
+    final ids = _everyone.map((p) => p.id).toSet();
+    for (final it in widget.d.items) {
+      it.people.retainAll(ids);
+    }
+  }
 
   // A preview of each person's part, with the same rules as the server:
   // items split equally between who had them, extras by each subtotal.
@@ -275,12 +286,9 @@ class _AssignScreenState extends State<_AssignScreen> {
   Future<void> _send() async {
     setState(() => _busy = true);
     try {
-      final parts = await api.splitByItems(
-        widget.d.what,
-        [for (final it in widget.d.items) {'name': it.name, 'amount_paise': it.amountPaise, 'people': it.people.toList()}],
-        widget.d.extraPaise,
-        key: _key,
-      );
+      final items = [for (final it in widget.d.items) {'name': it.name, 'amount_paise': it.amountPaise, 'people': it.people.toList()}];
+      final parts = await api.splitByItems(widget.d.what, items, widget.d.extraPaise,
+          key: _key.forRequest([widget.d.what, items, widget.d.extraPaise]));
       if (!mounted) return;
       final nav = Navigator.of(context)..popUntil((r) => r.isFirst);
       final asked = parts.where((p) => p.user.id != api.userId);
@@ -294,6 +302,7 @@ class _AssignScreenState extends State<_AssignScreen> {
         ),
       ));
     } catch (e) {
+      _key.failed(e);
       if (mounted) {
         setState(() => _busy = false);
         showError(context, e);

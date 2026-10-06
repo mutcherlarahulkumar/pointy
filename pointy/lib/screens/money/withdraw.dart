@@ -24,7 +24,7 @@ class WithdrawScreen extends StatefulWidget {
 class _WithdrawScreenState extends State<WithdrawScreen> {
   late Future<Me> _me = api.me();
   final _amount = TextEditingController();
-  String _key = newIdempotencyKey();
+  final _key = SubmitKey();
   bool _busy = false;
 
   @override
@@ -35,14 +35,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   Future<void> _linkPayPal(String current) async {
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => PayPalAccountScreen(current: current)));
-    if (saved == true && mounted) setState(() => _me = api.me());
+    if (saved == true && mounted) setState(() { _me = api.me(); });
   }
 
   Future<void> _send(Me me, int paise) async {
     if (!await confirmPayment(context, 'Withdraw ${formatPaise(paise)} to ${me.paypalEmail}')) return;
     setState(() => _busy = true);
     try {
-      final p = await api.withdraw(paise, key: _key);
+      final p = await api.withdraw(paise, key: _key.forRequest(paise));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => SuccessScreen(
@@ -59,7 +59,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         ),
       ));
     } catch (e) {
-      _key = newIdempotencyKey();
+      _key.failed(e);
       if (!mounted) return;
       setState(() => _busy = false);
       showError(context, e);
@@ -70,7 +70,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Widget build(BuildContext context) {
     return AsyncView<Me>(
       future: _me,
-      onRetry: () => setState(() => _me = api.me()),
+      onRetry: () => setState(() { _me = api.me(); }),
       builder: (context, me) {
         final paise = parseToPaise(_amount.text);
         final tooMuch = paise != null && paise > me.personalBalancePaise;

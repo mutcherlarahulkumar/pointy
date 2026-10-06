@@ -92,7 +92,7 @@ class _SuggestionsScreenState extends State<SuggestionsScreen> {
       appBar: AppBar(title: const Text('Suggestions')),
       body: AsyncView<List<_Item>>(
         future: _items,
-        onRetry: () => setState(() => _items = _load()),
+        onRetry: () => setState(() { _items = _load(); }),
         builder: (context, items) {
           if (items.isEmpty) {
             return const EmptyState(icon: Icons.auto_awesome, title: 'Nothing to suggest right now', body: 'As you pay and travel, ideas show up here.');
@@ -110,7 +110,7 @@ class _SuggestionsScreenState extends State<SuggestionsScreen> {
                     actionLabel: it.action,
                     onTap: () async {
                       await Navigator.of(context).push(it.route());
-                      setState(() => _items = _load());
+                      setState(() { _items = _load(); });
                     },
                   ),
                 ),

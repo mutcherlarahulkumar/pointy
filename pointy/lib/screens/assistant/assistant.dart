@@ -84,13 +84,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _toEnd();
     try {
       final plan = await api.draftPlan(widget.trip.id, text.trim());
+      if (!mounted) return; // left while the assistant was thinking
       setState(() {
         // The model's reply comes first, like a chat, then the plan to approve.
         if (plan.note.isNotEmpty) _messages.add(_Message.bot(plan.note));
         _messages.add(_Message.plan(plan));
       });
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.toString())));
+      if (mounted) setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
       _toEnd();
@@ -102,6 +103,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     try {
       // One key per plan: confirming the same plan twice cannot send twice.
       final sent = await api.confirmPlan(widget.trip.id, plan.id, key: 'confirm-${plan.id}');
+      if (!mounted) return;
       setState(() {
         final i = _messages.indexWhere((m) => m.plan?.id == plan.id);
         if (i >= 0) _messages[i] = _Message.plan(plan.withStatus('confirmed'));
@@ -111,7 +113,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                 'I mark them paid as the money comes in.'));
       });
     } on ApiException catch (e) {
-      setState(() => _messages.add(_Message.bot(e.toString())));
+      if (mounted) setState(() => _messages.add(_Message.bot(e.toString())));
     } finally {
       if (mounted) setState(() => _confirmingPlanId = null);
       _toEnd();
