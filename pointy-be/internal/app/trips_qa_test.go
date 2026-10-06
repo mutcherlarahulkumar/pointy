@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -110,6 +111,74 @@ func TestQAHugeBudgetIsRefused(t *testing.T) {
 	}
 }
 
+// Joins, a no, and listing all at once: whatever wins, the purchase is
+// paid at most once, the books balance and no share goes below zero.
+func TestQAConcurrentJoinsDeclineAndExpire(t *testing.T) {
+	for round := 0; round < 8; round++ {
+		s, pp, c := newTestService(t, nil)
+		s.SetShopper(shop.Demo{})
+		ctx := context.Background()
+		var users []string
+		for i, ph := range []string{"9876543210", "9123456780", "9988776655"} {
+			users = append(users, register(t, s, []string{"Asha", "Dev", "Meera"}[i], ph))
+		}
+		trip := goa(t, s, users[0], users[1:]...)
+		for _, u := range users {
+			topUp(t, s, u, 3000)
+			must[TripView](t)(s.DepositFromBalance(trip, u, domain.Rupees(3000)))
+		}
+		g := propose(t, s, trip, users[0], "beach towels")
+		if round%3 == 0 {
+			c.t = g.Deadline.Add(-1) // right at the edge; expiry may not happen yet
+		}
+		var wg sync.WaitGroup
+		for i, u := range users {
+			wg.Add(1)
+			go func(i int, u string) {
+				defer wg.Done()
+				if i == 2 && round%2 == 1 {
+					_, _ = s.JoinGroupBuy(ctx, g.ID, u, ViaPayPal)
+					s.mu.Lock()
+					order := shareOf(g, u).OrderID
+					s.mu.Unlock()
+					if order != "" {
+						_, _ = s.AuthorizeGroupBuyOrder(ctx, order, u)
+					}
+					return
+				}
+				_, _ = s.JoinGroupBuy(ctx, g.ID, u, ViaWallet)
+			}(i, u)
+		}
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = s.GroupBuys(ctx, trip, users[0]) }()
+		go func() {
+			defer wg.Done()
+			if round%4 == 0 {
+				_, _ = s.DeclineGroupBuy(ctx, g.ID, users[1])
+			}
+		}()
+		wg.Wait()
+		s.mu.Lock()
+		status := g.Status
+		paid := 0
+		for _, e := range s.expenses {
+			if e.Mode == ModeGroupBuy {
+				paid++
+			}
+		}
+		for _, u := range users {
+			if av := s.availL(domain.ShareAccount(trip, u)); av < 0 {
+				t.Errorf("round %d: %s has %d free", round, u, av)
+			}
+		}
+		s.mu.Unlock()
+		if (status == "paid") != (paid == 1) || paid > 1 || len(pp.Captures) > 1 {
+			t.Fatalf("round %d: status %s, %d expenses, captures %v", round, status, paid, pp.Captures)
+		}
+		checkBooks(t, s)
+	}
+}
+
 // hookPP lets a test run something while PayPal is placing a hold, the
 // moment the service has let go of its lock.
 type hookPP struct {
@@ -124,6 +193,59 @@ func (h *hookPP) AuthorizeOrder(ctx context.Context, orderID string) (string, er
 		f()
 	}
 	return h.Mock.AuthorizeOrder(ctx, orderID)
+}
+
+// ctxPP behaves like a real HTTP client: a cancelled context fails the call.
+type ctxPP struct{ *paypal.Mock }
+
+func (p ctxPP) CaptureAuthorization(ctx context.Context, authID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return p.Mock.CaptureAuthorization(ctx, authID)
+}
+
+func (p ctxPP) VoidAuthorization(ctx context.Context, authID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return p.Mock.VoidAuthorization(ctx, authID)
+}
+
+// The last yes comes from a phone that hangs up (the request is
+// cancelled) before PayPal answers: everyone agreed, so the purchase must
+// still be paid, not fail half way because of the dropped connection.
+// Likewise a no from a phone that hangs up still lets the PayPal holds go.
+func TestQAHangingUpDoesNotBreakPayingOrVoiding(t *testing.T) {
+	mock := &paypal.Mock{}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(ctxPP{mock}, c.now, nil)
+	s.SetShopper(shop.Demo{})
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	topUp(t, s, a, 3000)
+	must[TripView](t)(s.DepositFromBalance(trip, a, domain.Rupees(3000)))
+
+	g := propose(t, s, trip, a, "beach towels")
+	g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, d, ViaPayPal))
+	must[*domain.GroupBuy](t)(s.AuthorizeGroupBuyOrder(ctx, shareOf(g, d).OrderID, d))
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	g, err := s.JoinGroupBuy(gone, g.ID, a, ViaWallet)
+	if err != nil || g.Status != "paid" || len(mock.Captures) != 1 {
+		t.Fatalf("hung-up last yes: %v status %s captures %v", err, g.Status, mock.Captures)
+	}
+
+	g = propose(t, s, trip, a, "playing cards uno")
+	g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, d, ViaPayPal))
+	must[*domain.GroupBuy](t)(s.AuthorizeGroupBuyOrder(ctx, shareOf(g, d).OrderID, d))
+	g = must[*domain.GroupBuy](t)(s.DeclineGroupBuy(gone, g.ID, a))
+	if g.Status != "cancelled" || len(mock.Voids) != 1 {
+		t.Fatalf("hung-up no: status %s voids %v", g.Status, mock.Voids)
+	}
+	checkBooks(t, s)
 }
 
 func (h *hookPP) CreateAuthOrder(ctx context.Context, ref string, amount domain.Paise, desc string) (paypal.Order, error) {

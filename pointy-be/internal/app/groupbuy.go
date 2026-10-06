@@ -397,6 +397,9 @@ func (s *Service) AuthorizeGroupBuyOrder(ctx context.Context, orderID, userID st
 	if err != nil {
 		return nil, domain.Conflict("not_approved", "PayPal has not approved this yet. Approve it on PayPal, then try again.", nil)
 	}
+	// Money is held on PayPal now: what follows (paying or letting it go)
+	// must finish even if the phone hangs up.
+	ctx = context.WithoutCancel(ctx)
 
 	s.mu.Lock()
 	if g.Status != "open" || s.overdueL(g) {
@@ -505,6 +508,7 @@ func (s *Service) expireDue(ctx context.Context) {
 // at once (they are worked out from open purchases) and PayPal holds are
 // voided.
 func (s *Service) closeGroupBuy(ctx context.Context, g *domain.GroupBuy, status, note string) (*domain.GroupBuy, error) {
+	ctx = context.WithoutCancel(ctx) // the voids must run even if the phone hangs up
 	s.mu.Lock()
 	if g.Status != "open" {
 		s.mu.Unlock()
@@ -536,6 +540,9 @@ func (s *Service) closeGroupBuy(ctx context.Context, g *domain.GroupBuy, status,
 // purchase fails: money already captured becomes that person's trip share,
 // the other holds are voided, and nothing is bought.
 func (s *Service) maybeFinish(ctx context.Context, id string) (*domain.GroupBuy, error) {
+	// Everyone agreed: a phone hanging up must not stop the captures half
+	// way.
+	ctx = context.WithoutCancel(ctx)
 	s.mu.Lock()
 	var g *domain.GroupBuy
 	for _, x := range s.groupBuys {
