@@ -24,15 +24,28 @@ type server struct {
 	svc *app.Service
 	pp  paypal.Client
 
-	mu   sync.Mutex
-	idem map[string]replay // Idempotency-Key -> first response
+	mu       sync.Mutex
+	idem     map[string]*replay // Idempotency-Key -> first response
+	idemList []idemKey          // keys oldest first, to forget old answers
 }
 
 type replay struct {
-	status int
+	status int // 0 while the first request is still running
 	body   []byte
 	at     time.Time
+	done   chan struct{} // closed when the first request has finished
 }
+
+type idemKey struct {
+	key string
+	r   *replay
+}
+
+// Answers are kept for a day, and at most this many at once.
+const (
+	idemTTL = 24 * time.Hour
+	idemMax = 10000
+)
 
 type ctxKey struct{}
 
@@ -52,7 +65,7 @@ func bearer(r *http.Request) string {
 
 // New builds the router.
 func New(svc *app.Service, pp paypal.Client) http.Handler {
-	s := &server{svc: svc, pp: pp, idem: map[string]replay{}}
+	s := &server{svc: svc, pp: pp, idem: map[string]*replay{}}
 	mux := http.NewServeMux()
 
 	// handle registers a JSON endpoint. Unless public is true the caller
@@ -631,37 +644,68 @@ func (r *recorder) Write(b []byte) (int, error) {
 }
 
 // idempotent replays the first answer when a write is retried with the same
-// Idempotency-Key, so a double tap or a flaky network cannot pay twice.
-// Answers are kept for a day.
+// Idempotency-Key, so a double tap or a flaky network cannot pay twice. A
+// retry that arrives while the first is still running waits for its answer.
+// Keys belong to the signed-in caller; sign-in itself (public) is never
+// replayed, as its answer carries a token.
 func (s *server) idempotent(w http.ResponseWriter, r *http.Request, next func(http.ResponseWriter)) {
 	key := r.Header.Get("Idempotency-Key")
-	if key == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
+	if key == "" || userID(r) == "" || (r.Method != http.MethodPost && r.Method != http.MethodPut) {
 		next(w)
 		return
 	}
 	key = userID(r) + "|" + r.Method + "|" + r.URL.Path + "|" + key
-	s.mu.Lock()
-	old, seen := s.idem[key]
-	if len(s.idem) > 5000 {
-		for k, v := range s.idem {
-			if time.Since(v.at) > 24*time.Hour {
-				delete(s.idem, k)
+	for {
+		s.mu.Lock()
+		s.forgetOldL()
+		old, seen := s.idem[key]
+		if !seen {
+			e := &replay{at: time.Now(), done: make(chan struct{})}
+			s.idem[key] = e
+			s.idemList = append(s.idemList, idemKey{key, e})
+			s.mu.Unlock()
+			rec := &recorder{ResponseWriter: w, status: http.StatusOK}
+			next(rec)
+			s.mu.Lock()
+			if rec.status < 500 { // a server error may be retried for real
+				e.status, e.body = rec.status, rec.body.Bytes()
+			} else if s.idem[key] == e {
+				delete(s.idem, key)
 			}
+			close(e.done)
+			s.mu.Unlock()
+			return
 		}
-	}
-	s.mu.Unlock()
-	if seen {
+		s.mu.Unlock()
+		select {
+		case <-old.done:
+		case <-r.Context().Done():
+			return
+		}
+		s.mu.Lock()
+		status, body := old.status, old.body
+		s.mu.Unlock()
+		if status == 0 {
+			continue // the first one failed with a server error: run this one
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Idempotent-Replay", "true")
-		w.WriteHeader(old.status)
-		_, _ = w.Write(old.body)
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
 		return
 	}
-	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
-	next(rec)
-	if rec.status < 500 { // a server error may be retried for real
-		s.mu.Lock()
-		s.idem[key] = replay{rec.status, rec.body.Bytes(), time.Now()}
-		s.mu.Unlock()
+}
+
+// forgetOldL drops answers older than a day, and the oldest when full.
+func (s *server) forgetOldL() {
+	n := 0
+	for n < len(s.idemList) && (len(s.idemList)-n >= idemMax || time.Since(s.idemList[n].r.at) > idemTTL) {
+		if k := s.idemList[n]; s.idem[k.key] == k.r {
+			delete(s.idem, k.key)
+		}
+		n++
+	}
+	if n > 0 {
+		s.idemList = s.idemList[n:]
 	}
 }
