@@ -97,7 +97,8 @@ func TestQASplitRefusesOverflow(t *testing.T) {
 // moment the service has let go of its lock.
 type hookPP struct {
 	*paypal.Mock
-	onAuthorize func()
+	onAuthorize  func()
+	onCreateAuth func()
 }
 
 func (h *hookPP) AuthorizeOrder(ctx context.Context, orderID string) (string, error) {
@@ -106,6 +107,46 @@ func (h *hookPP) AuthorizeOrder(ctx context.Context, orderID string) (string, er
 		f()
 	}
 	return h.Mock.AuthorizeOrder(ctx, orderID)
+}
+
+func (h *hookPP) CreateAuthOrder(ctx context.Context, ref string, amount domain.Paise, desc string) (paypal.Order, error) {
+	if f := h.onCreateAuth; f != nil {
+		h.onCreateAuth = nil
+		f()
+	}
+	return h.Mock.CreateAuthOrder(ctx, ref, amount, desc)
+}
+
+// Saying yes from the trip share while the PayPal page is being made must
+// keep the wallet hold: the late PayPal order must not turn the share
+// into an unauthorized PayPal one.
+func TestQAPayPalJoinRacingWalletJoinKeepsTheWalletHold(t *testing.T) {
+	pp := &hookPP{Mock: &paypal.Mock{}}
+	c := &clock{time.Date(2026, 10, 13, 20, 42, 0, 0, IST)}
+	s := New(pp, c.now, nil)
+	s.SetShopper(shop.Demo{})
+	ctx := context.Background()
+	a := register(t, s, "Asha", "9876543210")
+	d := register(t, s, "Dev", "9123456780")
+	trip := goa(t, s, a, d)
+	for _, u := range []string{a, d} {
+		topUp(t, s, u, 3000)
+		must[TripView](t)(s.DepositFromBalance(trip, u, domain.Rupees(3000)))
+	}
+	g := propose(t, s, trip, a, "beach towels")
+	pp.onCreateAuth = func() { must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, d, ViaWallet)) }
+	g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, d, ViaPayPal))
+	if sh := shareOf(g, d); sh.Status != "in" || sh.Via != ViaWallet {
+		t.Fatalf("Dev's share %+v", sh)
+	}
+	g = must[*domain.GroupBuy](t)(s.JoinGroupBuy(ctx, g.ID, a, ViaWallet))
+	if g.Status != "paid" || len(pp.Captures) != 0 {
+		t.Fatalf("status %s captures %v", g.Status, pp.Captures)
+	}
+	if tv := must[TripView](t)(s.Trip(trip, a)); tv.Deposited != domain.Rupees(6000) || tv.Balance != domain.Rupees(6000)-g.Amount {
+		t.Fatalf("money appeared from nowhere: %+v", tv)
+	}
+	checkBooks(t, s)
 }
 
 // A person who approves on PayPal while also saying yes from their trip

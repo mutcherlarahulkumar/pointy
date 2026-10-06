@@ -363,6 +363,9 @@ func (s *Service) JoinGroupBuy(ctx context.Context, id, userID, via string) (*do
 		if g.Status != "open" {
 			return nil, domain.Conflict("group_buy_closed", "this purchase is "+g.Status, nil)
 		}
+		if sh.Status == "in" {
+			return g, nil // they said yes another way meanwhile; the new order is never approved
+		}
 		sh.Via, sh.OrderID, sh.ApproveURL = ViaPayPal, o.ID, o.ApproveURL
 		s.track(g)
 		if err := s.commitL(); err != nil {
