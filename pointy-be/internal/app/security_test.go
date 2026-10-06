@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -119,4 +121,33 @@ func TestTopUpStartedBeforeLinkingIsNotCaptured(t *testing.T) {
 		t.Fatalf("child holds %d", b)
 	}
 	checkBooks(t, s)
+}
+
+// Firing many PIN guesses at once does not get more than five checked:
+// the lockout counts a guess before the slow comparison, not after.
+func TestPINGuessesAtOnceShareTheLockout(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	u := register(t, s, "Asha", "9876543210")
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	checked := 0
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := s.VerifyPIN(u, fmt.Sprintf("%06d", 100000+i))
+			if code(err) == "wrong_pin" {
+				mu.Lock()
+				checked++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if checked > maxFailedPINs {
+		t.Fatalf("%d guesses were checked; the lockout allows %d", checked, maxFailedPINs)
+	}
+	if err := s.VerifyPIN(u, pin); code(err) != "too_many_attempts" {
+		t.Fatalf("should be locked: %v", err)
+	}
 }

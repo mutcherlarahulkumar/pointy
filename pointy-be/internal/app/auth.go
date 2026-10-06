@@ -163,14 +163,14 @@ func (s *Service) checkPIN(phone, pin string) (string, error) {
 	if ok {
 		hash = s.users[id].PinHash
 	}
+	// Count the guess now, before the slow check, so many guesses sent at
+	// once cannot all slip under the limit. A right PIN clears it.
+	s.failedLogins[phone] = append(s.failedLogins[phone], s.now())
+	left := maxFailedPINs - len(s.failedLogins[phone])
 	s.mu.Unlock()
 
 	// bcrypt is slow on purpose, so it runs without the lock.
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(pin)) != nil {
-		s.mu.Lock()
-		s.failedLogins[phone] = append(s.failedLogins[phone], s.now())
-		left := maxFailedPINs - len(s.failedLogins[phone])
-		s.mu.Unlock()
 		if !ok {
 			return "", domain.NotFound("account for this number")
 		}
