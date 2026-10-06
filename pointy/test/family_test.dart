@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:pointy/api.dart';
+import 'package:pointy/models.dart';
 import 'package:pointy/payment_lock.dart';
+import 'package:pointy/screens/family/add_child.dart';
 import 'package:pointy/screens/family/child_detail.dart';
 import 'package:pointy/screens/family/family.dart';
 import 'package:pointy/theme.dart';
@@ -79,5 +83,20 @@ void main() {
 
     expect(find.text('Paid'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the pairing code counts down and says when it ran out', (tester) async {
+    phone(tester);
+    api = fakeApi(overrides: {'GET /api/family': (200, '{"role":"parent","children":[]}')});
+    final pending = _child.replaceFirst('"status":"active"', '"status":"pending"');
+    final inv = FamilyInvite.fromJson(jsonDecode('{"child":$pending,"code":"123456","expires":"2026-10-05T12:00:00+05:30"}') as Map<String, dynamic>);
+    // Expires in 3 seconds, from now on the phone's clock.
+    final soon = FamilyInvite(child: inv.child, code: inv.code, expires: DateTime.now().add(const Duration(seconds: 3)));
+    await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: PairingCodeScreen(invite: soon)));
+    expect(find.text('123 456'), findsOneWidget);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(seconds: 4)));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('This code ran out. Start again.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox()); // stops its timers
   });
 }
