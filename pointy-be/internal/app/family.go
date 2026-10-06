@@ -163,7 +163,6 @@ func (s *Service) childSendCheckL(from string, in ExpenseInput) error {
 	if code := strings.TrimSpace(in.ParentCode); code != "" {
 		// Wrong codes are counted, so a 6-digit code cannot be guessed by
 		// trying them all.
-		now := s.now()
 		recent := s.failedCodes[l.ID][:0:0]
 		for _, at := range s.failedCodes[l.ID] {
 			if now.Sub(at) < codeLockout {
@@ -727,11 +726,17 @@ func (s *Service) DecideApproval(parentID, id string, approve bool, pin string) 
 	if l == nil || l.ParentID != parentID {
 		return ApprovalView{}, domain.NotFound("approval")
 	}
+	now := s.now()
+	if a.Status == "pending" && s.childLinkL(a.ChildID) != l {
+		// The link ended (the child turned 18): the parent no longer
+		// decides for this account.
+		a.Status, a.DecidedAt = "expired", &now
+		s.track(a)
+	}
 	if a.Status != "pending" {
 		_ = s.commitL()
 		return ApprovalView{}, domain.Conflict("approval_closed", "this request is "+a.Status, nil)
 	}
-	now := s.now()
 	if !approve {
 		a.Status, a.DecidedAt = "declined", &now
 		s.track(a)
