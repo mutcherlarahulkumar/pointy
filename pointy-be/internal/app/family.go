@@ -497,6 +497,13 @@ func (s *Service) childFitsL(childID string) error {
 	if bal := s.ledger.Owed(domain.PersonalAccount(childID)); bal > ChildMaxBalance {
 		return domain.Conflict("child_balance_cap", s.name(childID)+" has "+INR(bal)+"; a child account can hold at most "+INR(ChildMaxBalance)+". Spend or withdraw the rest first", nil)
 	}
+	// A withdrawal PayPal may still send back would land in the child
+	// wallet past its caps.
+	for _, p := range s.payoutsForL(childID) {
+		if p.Status == "sending" || p.Status == "pending" || p.Status == "unclaimed" {
+			return domain.Conflict("child_payout_open", s.name(childID)+" has a withdrawal still on its way to PayPal; link once it has arrived", nil)
+		}
+	}
 	for _, t := range s.trips {
 		if t.Status == domain.TripOpen && t.HasMember(childID) {
 			return domain.Conflict("child_in_trip", s.name(childID)+" is in the open trip "+t.Name+"; settle it first", nil)

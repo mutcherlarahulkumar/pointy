@@ -123,6 +123,31 @@ func TestTopUpStartedBeforeLinkingIsNotCaptured(t *testing.T) {
 	checkBooks(t, s)
 }
 
+// A withdrawal PayPal may still send back cannot land in a child wallet
+// past its caps: the account cannot be linked while one is on its way.
+func TestNoLinkWhileAWithdrawalCanComeBack(t *testing.T) {
+	s, pp, _ := newTestService(t, nil)
+	ctx := context.Background()
+	p := register(t, s, "Rahul", "9876543210")
+	k := register(t, s, "Meera", "9123456780")
+	topUp(t, s, k, 50000)
+	must[Me](t)(s.SetPayPalEmail(k, "nobody@example.com"))
+	pp.PayoutFirst, pp.PayoutLater = "UNCLAIMED", "RETURNED"
+	must[*domain.Payout](t)(s.Withdraw(ctx, k, domain.Rupees(45000)))
+	if _, err := s.InviteChild(p, InviteInput{ChildPhone: "9123456780", BirthDate: "2012-05-03", DailyLimit: domain.Rupees(300),
+		MonthlyLimit: domain.Rupees(3000), AcceptTerms: FamilyTermsVersion, PIN: pin}); code(err) != "child_payout_open" {
+		t.Fatalf("linked with a withdrawal on its way: %v", err)
+	}
+	s.RefreshPayouts(ctx, k) // PayPal sends it back
+	if b := balance(s, k); b != domain.Rupees(50000) {
+		t.Fatalf("balance %d", b)
+	}
+	if _, err := s.InviteChild(p, InviteInput{ChildPhone: "9123456780", BirthDate: "2012-05-03", DailyLimit: domain.Rupees(300),
+		MonthlyLimit: domain.Rupees(3000), AcceptTerms: FamilyTermsVersion, PIN: pin}); code(err) != "child_balance_cap" {
+		t.Fatalf("back over the cap: %v", err)
+	}
+}
+
 // Firing many PIN guesses at once does not get more than five checked:
 // the lockout counts a guess before the slow comparison, not after.
 func TestPINGuessesAtOnceShareTheLockout(t *testing.T) {
