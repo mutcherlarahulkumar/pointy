@@ -306,6 +306,27 @@ func TestPersonalPaymentCannotBeBackdated(t *testing.T) {
 	}
 }
 
+// A trip wallet paying a child (mode member) is money into a child account
+// like any other: the child-wallet caps apply.
+func TestTripPaymentToChildKeepsChildCaps(t *testing.T) {
+	s, _, p, k := family(t)
+	x := register(t, s, "Asha", "9988776655")
+	topUp(t, s, p, 20000)
+	topUp(t, s, x, 20000)
+	trip := goa(t, s, p, x)
+	must[TripView](t)(s.DepositFromBalance(trip, p, domain.Rupees(15000)))
+	must[TripView](t)(s.DepositFromBalance(trip, x, domain.Rupees(15000)))
+	_, err := s.AddExpense(trip, p, ExpenseInput{Description: "Gift", Category: domain.Other, Amount: domain.Rupees(20000),
+		Mode: ModeMember, PayeeUserID: k, ConfirmOverBudget: true})
+	if code(err) != "child_balance_cap" {
+		t.Fatalf("₹20,000 into a child account from a trip: %v", err)
+	}
+	if b := balance(s, k); b > ChildMaxBalance {
+		t.Fatalf("child holds %d", b)
+	}
+	checkBooks(t, s)
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {
