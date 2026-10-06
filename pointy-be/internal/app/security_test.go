@@ -77,3 +77,27 @@ func TestTripPaymentToAChildKeepsTheCaps(t *testing.T) {
 	}
 	checkBooks(t, s)
 }
+
+// Linking cannot make a loop (two people each other's parent) or give a
+// child a parent who is a child.
+func TestLinksCannotLoopOrChain(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	a := register(t, s, "Asha", "9811111111")
+	b := register(t, s, "Dev", "9822222222")
+	ab := invite(t, s, a, "9822222222", "2012-05-03") // a would look after b
+	ba := invite(t, s, b, "9811111111", "2012-05-03") // b would look after a
+	must[ChildView](t)(s.AcceptInvite(a, ba.Child.LinkID, ba.Code, pin))
+	if _, err := s.AcceptInvite(b, ab.Child.LinkID, ab.Code, pin); code(err) != "is_parent" {
+		t.Fatalf("b, a's parent, became a's child: %v", err)
+	}
+
+	p := register(t, s, "Rahul", "9876543210")
+	k := register(t, s, "Meera", "9123456780")
+	g := register(t, s, "Gita", "9833333333")
+	pk := invite(t, s, p, "9123456780", "2012-05-03")
+	gp := invite(t, s, g, "9876543210", "2012-05-03")
+	must[ChildView](t)(s.AcceptInvite(p, gp.Child.LinkID, gp.Code, pin)) // Rahul is now a child
+	if _, err := s.AcceptInvite(k, pk.Child.LinkID, pk.Code, pin); code(err) != "child_account" {
+		t.Fatalf("a child became a parent: %v", err)
+	}
+}

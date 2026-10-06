@@ -533,8 +533,15 @@ func (s *Service) AcceptInvite(childID, linkID, code, pin string) (ChildView, er
 		return ChildView{}, &domain.Error{Status: 401, Code: "wrong_code", Message: "that code is not the one on your parent's phone",
 			Details: map[string]int{"attempts_left": max(0, maxCodeAttempts-l.CodeAttempts)}}
 	}
-	if s.isChildL(childID) {
+	// Things may have changed since the invite: no child with two parents,
+	// no parent who is a child, no two people each other's parent.
+	switch {
+	case s.isChildL(childID):
 		return ChildView{}, domain.Conflict("already_linked", "you already have a parent on Pointy", nil)
+	case s.isParentL(childID):
+		return ChildView{}, domain.Conflict("is_parent", "you look after a child account, so yours cannot be one", nil)
+	case s.isChildL(l.ParentID):
+		return ChildView{}, childOnly("Looking after another account")
 	}
 	if err := s.childFitsL(childID); err != nil {
 		return ChildView{}, err
