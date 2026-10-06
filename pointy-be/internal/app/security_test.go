@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -100,4 +101,22 @@ func TestLinksCannotLoopOrChain(t *testing.T) {
 	if _, err := s.AcceptInvite(k, pk.Child.LinkID, pk.Code, pin); code(err) != "child_account" {
 		t.Fatalf("a child became a parent: %v", err)
 	}
+}
+
+// A PayPal top-up started before the account became a child account
+// cannot be captured into the child's wallet.
+func TestTopUpStartedBeforeLinkingIsNotCaptured(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	p := register(t, s, "Rahul", "9876543210")
+	k := register(t, s, "Meera", "9123456780")
+	d := must[*domain.Deposit](t)(s.StartTopUp(context.Background(), k, domain.Rupees(50000)))
+	inv := invite(t, s, p, "9123456780", "2012-05-03")
+	must[ChildView](t)(s.AcceptInvite(k, inv.Child.LinkID, inv.Code, pin))
+	if _, err := s.CaptureDeposit(context.Background(), d.OrderID); code(err) != "child_account" {
+		t.Fatalf("capture into a child wallet: %v", err)
+	}
+	if b := balance(s, k); b != 0 {
+		t.Fatalf("child holds %d", b)
+	}
+	checkBooks(t, s)
 }

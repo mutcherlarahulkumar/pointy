@@ -468,6 +468,14 @@ func (s *Service) CaptureDeposit(ctx context.Context, orderID string) (*domain.D
 		}
 		return nil, domain.Conflict("capture_in_progress", "this payment is already being completed", nil)
 	}
+	if s.isChildL(d.UserID) {
+		// Started before the account became a child account: PayPal is
+		// for adults, and it would skip the small-wallet caps. Never
+		// captured, so nothing is charged.
+		_ = s.commitL() // a child who just turned 18
+		s.mu.Unlock()
+		return nil, childOnly("Adding money with PayPal")
+	}
 	d.Status = "capturing"
 	s.mu.Unlock()
 
