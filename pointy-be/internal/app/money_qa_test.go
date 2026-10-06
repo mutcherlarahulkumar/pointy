@@ -496,6 +496,22 @@ func TestPayoutSentButNotSavedStaysHeld(t *testing.T) {
 	}
 }
 
+// Sign-in tries on numbers with no account keep nothing in memory.
+func TestUnknownNumbersDoNotFillLockoutMemory(t *testing.T) {
+	s, _, _ := newTestService(t, nil)
+	for i := 0; i < 200; i++ {
+		if _, err := s.Login(fmt.Sprintf("98%08d", i), "135790"); code(err) != "not_found" {
+			t.Fatalf("unknown number: %v", err)
+		}
+	}
+	s.mu.Lock()
+	n := len(s.failedLogins)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d numbers kept", n)
+	}
+}
+
 // Item prices so big they wrap around int64 must be refused, not added up
 // into a small, wrong bill.
 func TestSplitByItemsRefusesHugeItems(t *testing.T) {
